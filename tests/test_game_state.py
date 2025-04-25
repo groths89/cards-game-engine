@@ -17,20 +17,24 @@ class TestGameStateClass(unittest.TestCase):
 
     def test_starting_player_scenario(self):
         player_names = ["Alice", "Bob", "Charlie"]
-        players = [Player(name) for name in player_names]
-        test_deck = Deck()
-        three_of_clubs = None
-        for card in test_deck.cards:
-            if card.suit == "Clubs" and card.rank == 3:
-                three_of_clubs = card
+        game_state = GameState(player_names)  # Creates and deals a shuffled deck
+
+        three_of_clubs = Card("Clubs", 3)
+
+        # Find if anyone has the 3 of Clubs and remove it
+        for player in game_state.players:
+            if three_of_clubs in player.get_hand().cards:
+                player.get_hand().cards.remove(three_of_clubs)
                 break
-        if three_of_clubs:
-            test_deck.cards.remove(three_of_clubs)
-            test_deck.cards.insert(2, three_of_clubs)
-        game_state = GameState(player_names)
-        game_state.deck.cards = test_deck.cards
-        game_state.deal_cards_to_players()
-        self.assertEqual(game_state.get_current_player().name, "Charlie")
+
+        # Add the 3 of Clubs to Charlie's hand (Charlie is at index 2)
+        game_state.players[2].get_hand().add_card(three_of_clubs)
+
+        # Determine the starting player
+        starting_player_index = game_state.determine_starting_player()
+        starting_player = game_state.get_current_player()
+
+        self.assertEqual(starting_player.name, "Charlie")
 
 if __name__ == "__main__":
     unittest.main()

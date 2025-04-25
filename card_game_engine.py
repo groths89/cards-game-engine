@@ -120,8 +120,8 @@ class GameState:
         for index, player in enumerate(self.players):
             for card in player.get_hand().cards:
                 if card.suit == self.starting_card_suit and card.rank == self.starting_card_rank:
-                    return index
-            return 0
+                    return index # Correctly returning the player's index
+        return 0 # Default if 3 of Clubs isn't found (shouldn't happen)
 
     # Create a method to get the current player
     def get_current_player(self):
@@ -143,3 +143,20 @@ class GameState:
             if len(player.get_hand().cards) > 0:
                 players_with_cards += 1
         return players_with_cards == 1
+
+def test_initial_state():
+    player_names = ["Alice", "Bob", "Charlie"]
+    game_state = GameState(player_names)
+
+    print("--- Initial Game State ---")
+    print(f"Number of cards in deck: {len(game_state.deck)}")
+    for player in game_state.players:
+        print(f"{player}") # This will print each player's hand
+
+    starting_player = game_state.get_current_player()
+    print(f"Starting player: {starting_player.name}")
+    print(f"Initial pile: {game_state.get_game_pile()}")
+    print(f"Is game over? {game_state.is_game_over()}")
+
+if __name__ == "__main__":
+    test_initial_state()
