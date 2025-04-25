@@ -92,35 +92,54 @@ class Player:
         return f"Player(name='{self.name}', hand='{self.hand}')"
     
 class GameState:
-    def __init__(self, players:list):
+    def __init__(self, players):
         self.deck = Deck()
-        self.players = players
-
-        # Loop through the whole 52 deck of cards as long as there are cards in the deck
-        # Deal them to each player in the list
-        # Determine who goes first by looking for the Ace of Spades; store the index of the player holding it
-        # in a current player variable
-        # Initialize an empty list to represent the pile of cards in play; this should be None at the start of a new set
-        # Initialize variables to track the currently played set
-
+        self.deck.shuffle()
+        self.players = [Player(name) for name in players]
+        self.pile = []
+        self.current_play_rank = None
+        self.current_play_count = None
+        self.deal_cards_to_players()
+        self.current_player_index = self.determine_starting_player()
+    
     # Create a method that deals the entire deck to each player in the list
-    # Takes the deck and the list of players as arguments
-    # Should deal one by one in a round-robin fashion until deck is empty
+    def deal_cards_to_players(self):
+        self.number_of_players = len(self.players)
+        player_index = 0
+        while len(self.deck) > 0:
+            card_to_deal = self.deck.deal_card()
+            if card_to_deal:
+                self.players[player_index].hand.add_card(card_to_deal)
+                player_index = (player_index + 1) % self.number_of_players
 
     # Create a method that determines the starting player
-    # This should iterate through each player's hand to find the player holding the ace of spades
-    # It should return the index of that player in the list; if the card isn't present then start with the first player
+    def determine_starting_player(self):
+        self.starting_card_suit = "Clubs"
+        self.starting_card_rank = 3
+
+        for index, player in enumerate(self.players):
+            for card in player.get_hand().cards:
+                if card.suit == self.starting_card_suit and card.rank == self.starting_card_rank:
+                    return index
+            return 0
 
     # Create a method to get the current player
-    # It should return the player whose turn it is currently based on the index
+    def get_current_player(self):
+        return self.players[self.current_player_index]
 
     # Create a method for what happens on that players turn
-    # It should take a player and a list of cards to play as an argument
+    def on_players_turn(self):
+        # It should take a player and a list of cards to play as an argument
+        pass
 
     # Create a method for the game pile
-    # It should return the current self pile
-
+    def get_game_pile(self):
+        return self.pile
+    
     # Create a method to check for the game over state
-    # It should iterate through the list of players
-    # It should count how many players have non-empty hands (greater than 0)
-    # It should end the game if the count of players is equal to 1; otherwise game is not over
+    def is_game_over(self):
+        players_with_cards = 0
+        for player in self.players:
+            if len(player.get_hand().cards) > 0:
+                players_with_cards += 1
+        return players_with_cards == 1
