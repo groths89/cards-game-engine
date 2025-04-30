@@ -26,12 +26,50 @@ The initial development will focus on creating the fundamental building blocks:
 - **Hand Class:** Represents a player's hand of cards, with methods for adding and removing cards.
 - **Basic Game Initialization:** Setting up the deck, dealing to players.
 
+## Features
+
+- **Standard 52-card deck:** Includes creation, shuffling, and dealing of a standard deck of cards.
+- **Multiple players:** Supports gameplay with multiple players.
+- **Turn-based gameplay:** Manages the progression of turns between players.
+- **Card playing validation:** Enforces rules for playing cards (same rank, higher rank to play on the pile).
+- **"Stall" card (3):** Detects when a 3 is played as a stall.
+- **"Clearing" second 3:** Implements the rule where the second 3 played in a round clears the pile and gives the turn to the player who played it (acting as a 2).
+- **Ace of Spades starts:** Implements the rule where the player holding the Ace of Spades goes first.
+- **Game over detection:** Determines when the game ends (only one player left with cards).
+- **Basic game state tracking:** Keeps track of the current player, the cards on the pile, and the current play rank and count.
+
 ## Next Steps
 
-- Implement player turns and basic play validation.
-- Handle passing and clearing the pile.
-- Determine the winner of a round.
+- Detecting the end of a "round of play based on consecutive passes
+- Allowing the last player to play to lead the next round
+- Tracking when a player runs out of cards and is out of the game
+- Determining the game over condition (only one player left with cards)
+- Tracking the order in which players go out to determine their rank
+
+## How to Use
+
+1.  **Clone the repository** (if you haven't already).
+2.  **Run the game** (you'll need to add code to instantiate and run the game loop, which is the next step in development).
+
+    ```bash
+    python card_game_engine.py
+    ```
+
+## Development Status
+
+This project is currently under development. The following features are planned for future implementation:
+
+- Handling a complete round of play (consecutive passes).
+- Tracking players who are out of the game.
+- Determining the order in which players go out (ranking).
+- Implementing a basic game loop to drive the game flow.
+- Potentially adding support for passing.
+- More comprehensive unit tests.
 
 ## Development Environment
 
 - **Language:** Python(Game Engine), JavaScript (Front-End UI)
+
+## Contributing
+
+Contributions are welcome! If you have suggestions, bug reports, or would like to contribute code, please feel free to open an issue or submit a pull request.

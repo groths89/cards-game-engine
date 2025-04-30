@@ -21,6 +21,11 @@ class Card:
             11: 11, 12: 12, 13: 13, 14: 14, 2: 15 # 2 is typically high and is the clearing card
         }
         return rank_values.get(self.rank)
+    
+    def __eq__(self, other):
+        if not isinstance(other, Card):
+            return NotImplemented
+        return self.suit == other.suit and self.rank == other.rank
 
 class Deck:
     def __init__(self):
@@ -43,12 +48,11 @@ class Deck:
         return len(self.cards)
 
 class Hand:
-    def __init__(self):
-        self.cards = []
+    def __init__(self, cards=None):
+        self.cards = cards if cards is not None else []
 
     def add_card(self, card):
-        if card:
-            self.cards.append(card)
+        self.cards.append(card)
     
     def __str__(self):
         return ", ".join(str(card) for card in self.cards)
@@ -63,8 +67,8 @@ class Hand:
         # For now, let's just remove the cards from the hand.
         # We'll add validation logic in the game state.
         played_cards = []
-        incices_to_remove = sorted([self.cards.index(card) for card in cards_to_play], reverse=True)
-        for index in incices_to_remove:
+        indices_to_remove = sorted([self.cards.index(card) for card in cards_to_play], reverse=True)
+        for index in indices_to_remove:
             played_cards.append(self.cards.pop(index))
         return played_cards
     
@@ -80,7 +84,7 @@ class Player:
         self.hand.add_card(card)
 
     def play_cards(self, cards_to_play):
-        return Hand.play_cards(cards_to_play)
+        self.hand.play_cards(cards_to_play)
 
     def get_hand(self):
         return self.hand
@@ -101,6 +105,7 @@ class GameState:
         self.current_play_count = None
         self.deal_cards_to_players()
         self.current_player_index = self.determine_starting_player()
+        self.threes_played_this_round = 0 # Initialize the counter
     
     # Create a method that deals the entire deck to each player in the list
     def deal_cards_to_players(self):
@@ -114,8 +119,8 @@ class GameState:
 
     # Create a method that determines the starting player
     def determine_starting_player(self):
-        self.starting_card_suit = "Clubs"
-        self.starting_card_rank = 3
+        self.starting_card_suit = "Spades"
+        self.starting_card_rank = 14
 
         for index, player in enumerate(self.players):
             for card in player.get_hand().cards:
@@ -125,12 +130,77 @@ class GameState:
 
     # Create a method to get the current player
     def get_current_player(self):
-        return self.players[self.current_player_index]
+        if self.players:
+            return self.players[self.current_player_index]
+        return None
 
     # Create a method for what happens on that players turn
-    def on_players_turn(self):
-        # It should take a player and a list of cards to play as an argument
-        pass
+    def play_turn(self, player, cards_to_play):
+        current_player = self.get_current_player()
+        if (current_player != player):
+            print(f"It's not {player.name}'s turn. It's {current_player.name}'s turn.")
+            return
+        
+        player_hand = player.get_hand().cards
+        for card_to_play in cards_to_play:
+            if card_to_play not in player_hand:
+                print(f"{player.name} does not have the card {card_to_play} in their hand.")
+                return
+
+        if not cards_to_play:
+            print(f"{player.name} must play at least one card to start the trick.")
+
+        played_rank = cards_to_play[0].rank
+        if not all(card.rank == played_rank for card in cards_to_play):
+            print(f"{player.name} must play cards of the same rank.")
+            return
+
+        # --- Detect and Handle 3 plays ---
+        if played_rank == 3:
+            self.threes_played_this_round += len(cards_to_play) # Increment counter by the number of 3s played
+            print(f"{player.name} has played {len(cards_to_play)} threes (total: {self.threes_played_this_round} this round).")
+            # Add the second 3 logic here later
+            player.play_cards(cards_to_play)
+            self.pile.extend(cards_to_play)
+
+            if self.threes_played_this_round >= 2:
+                print("Second 3 played! Pile cleared. It starts with the player who played the second 3.")
+                self.pile = []
+                self.current_play_rank = None # reset the rank
+                self.current_play_count = None # reset the count
+                self.current_player_index = self.players.index(player) # It starts with the current player
+                self.threes_played_this_round = 0 # reset the counter for the next round
+            else:
+                self.current_player_index = (self.current_player_index + 1) % len(self.players)
+            return # End the turn after playing a 3 for now
+
+        # --- Handle non-3 plays ---
+        if not self.pile:
+            print(f"{player.name} has played {cards_to_play}.")
+            player.play_cards(cards_to_play)
+            self.pile.extend(cards_to_play)
+            self.current_play_rank = cards_to_play[0].get_value()
+            self.current_play_count = len(cards_to_play)
+            self.current_player_index = (self.current_player_index + 1) % len(self.players)
+        elif len(cards_to_play) == self.current_play_count:
+            played_value = cards_to_play[0].get_value()
+            if played_value > self.current_play_rank:
+                print(f"{player.name} has played {cards_to_play}.")
+                player.play_cards(cards_to_play)
+                self.pile.extend(cards_to_play)
+                self.current_play_rank = played_value # Use played_value here
+                self.current_play_count = len(cards_to_play)
+                self.current_player_index = (self.current_player_index + 1) % len(self.players)
+            else:
+                print(f"{player.name}'s play is not higher than the current play.")
+                return
+        else:
+            print(f"{player.name} must play {self.current_play_count} cards to match the pile.")
+            return
+
+        if self.is_game_over():
+            print("Game Over!")
+            # Handle game over logic
 
     # Create a method for the game pile
     def get_game_pile(self):
