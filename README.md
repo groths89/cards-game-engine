@@ -35,16 +35,23 @@ The initial development will focus on creating the fundamental building blocks:
 - **"Stall" card (3):** Detects when a 3 is played as a stall.
 - **"Clearing" second 3:** Implements the rule where the second 3 played in a round clears the pile and gives the turn to the player who played it (acting as a 2).
 - **Ace of Spades starts:** Implements the rule where the player holding the Ace of Spades goes first.
-- **Game over detection:** Determines when the game ends (only one player left with cards).
+- **Handling rounds of play:** Implements logic for consecutive passes and the start of a new round.
+- **Player input:** Allows players to enter "Play" or "Pass" as their action and specify cards to play via text input.
+- **Basic game over detection:** Determines when the game ends (only one player left with cards).
+- **Game loop:** Implements a main game loop to drive the game flow based on player actions and game state.
+- **Card input parsing:** Robustly parses player input to identify cards to play, handling different formats and validating against the player's hand.
 - **Basic game state tracking:** Keeps track of the current player, the cards on the pile, and the current play rank and count.
 
 ## Next Steps
 
-- Detecting the end of a "round of play based on consecutive passes
-- Allowing the last player to play to lead the next round
-- Tracking when a player runs out of cards and is out of the game
-- Determining the game over condition (only one player left with cards)
 - Tracking the order in which players go out to determine their rank
+- Tracking players who are out of the game.
+- Determining the order in which players go out (ranking).
+- Implementing the `handle_player_out()` method in the game loop.
+- Implementing the `end_game()` method to declare the "Asshole".
+- Potentially adding support for more complex passing scenarios.
+- More comprehensive unit tests.
+- Development of a graphical user interface (UI).
 
 ## How to Use
 
@@ -59,12 +66,14 @@ The initial development will focus on creating the fundamental building blocks:
 
 This project is currently under development. The following features are planned for future implementation:
 
-- Handling a complete round of play (consecutive passes).
+- Tracking the order in which players go out to determine their rank
 - Tracking players who are out of the game.
 - Determining the order in which players go out (ranking).
-- Implementing a basic game loop to drive the game flow.
-- Potentially adding support for passing.
+- Implementing the `handle_player_out()` method in the game loop.
+- Implementing the `end_game()` method to declare the "Asshole".
+- Potentially adding support for more complex passing scenarios.
 - More comprehensive unit tests.
+- Development of a graphical user interface (UI).
 
 ## Development Environment
 

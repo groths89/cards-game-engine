@@ -106,6 +106,7 @@ class GameState:
         self.deal_cards_to_players()
         self.current_player_index = self.determine_starting_player()
         self.threes_played_this_round = 0 # Initialize the counter
+        self.consecutive_passes = 0 # Initialize the consecutive passes counter
     
     # Create a method that deals the entire deck to each player in the list
     def deal_cards_to_players(self):
@@ -141,14 +142,44 @@ class GameState:
             print(f"It's not {player.name}'s turn. It's {current_player.name}'s turn.")
             return
         
+        played_rank = cards_to_play[0].rank
+        played_count = len(cards_to_play)
         player_hand = player.get_hand().cards
+
+        player_has_only_this_rank = True
+        for card in player_hand:
+            if card.rank == played_rank and card not in cards_to_play:
+                player_has_only_this_rank = False
+                break
+            elif card.rank != played_rank:
+                pass # Player might have other ranks
+
+        player_played_all_of_rank = False
+        cards_of_rank_in_hand = [card for card in player_hand if card.rank == played_rank]
+        if cards_of_rank_in_hand and len(cards_of_rank_in_hand) == played_count:
+            player_played_all_of_rank = True
+
+        if player_played_all_of_rank and player_has_only_this_rank:
+            print(f"{player.name} has played all their {self.get_rank_name(played_rank)}s and clears the pile!")
+            player.play_cards(cards_to_play)
+            self.pile = []
+            self.current_play_rank = None
+            self.current_play_count = None
+            self.consecutive_passes = 0
+            return # Player leads the next round, so "current_player_index" doesn't change yet
+
+
         for card_to_play in cards_to_play:
             if card_to_play not in player_hand:
                 print(f"{player.name} does not have the card {card_to_play} in their hand.")
                 return
 
-        if not cards_to_play:
-            print(f"{player.name} must play at least one card to start the trick.")
+        if not cards_to_play and self.pile: # Empty "cards_to_play" is now handled by "pass_turn" method
+            print(f"{player.name} must use the pass action.")
+            return
+        elif not cards_to_play and not self.pile:
+            print(f"{player.name} must play at least one card to start the round.")
+            return
 
         played_rank = cards_to_play[0].rank
         if not all(card.rank == played_rank for card in cards_to_play):
@@ -157,17 +188,18 @@ class GameState:
 
         # --- Detect and Handle 3 plays ---
         if played_rank == 3:
-            self.threes_played_this_round += len(cards_to_play) # Increment counter by the number of 3s played
-            print(f"{player.name} has played {len(cards_to_play)} threes (total: {self.threes_played_this_round} this round).")
+            self.threes_played_this_round += played_count # Increment counter by the number of 3s played
+            print(f"{player.name} has played {played_count} threes (total: {self.threes_played_this_round} this round).")
             # Add the second 3 logic here later
             player.play_cards(cards_to_play)
             self.pile.extend(cards_to_play)
+            self.consecutive_passes = 0 # Reset passes on a successful play
 
             if self.threes_played_this_round >= 2:
                 print("Second 3 played! Pile cleared. It starts with the player who played the second 3.")
                 self.pile = []
                 self.current_play_rank = None # reset the rank
-                self.current_play_count = None # reset the count
+                self.current_play_count = played_count # reset the count
                 self.current_player_index = self.players.index(player) # It starts with the current player
                 self.threes_played_this_round = 0 # reset the counter for the next round
             else:
@@ -182,6 +214,7 @@ class GameState:
             self.current_play_rank = cards_to_play[0].get_value()
             self.current_play_count = len(cards_to_play)
             self.current_player_index = (self.current_player_index + 1) % len(self.players)
+            self.consecutive_passes = 0 # Reset passes on a successful play
         elif len(cards_to_play) == self.current_play_count:
             played_value = cards_to_play[0].get_value()
             if played_value > self.current_play_rank:
@@ -191,6 +224,7 @@ class GameState:
                 self.current_play_rank = played_value # Use played_value here
                 self.current_play_count = len(cards_to_play)
                 self.current_player_index = (self.current_player_index + 1) % len(self.players)
+                self.consecutive_passes = 0 # Reset passes on a successful play
             else:
                 print(f"{player.name}'s play is not higher than the current play.")
                 return
@@ -202,17 +236,126 @@ class GameState:
             print("Game Over!")
             # Handle game over logic
 
+    def get_rank_name(self, rank):
+        if 1 < rank < 11:
+            return str(rank)
+        elif rank == 11:
+            return "Jack"
+        elif rank == 12:
+            return "Queen"
+        elif rank == 13:
+            return "King"
+        elif rank == 14:
+            return "Ace"
+        return str(rank)
+
+    def pass_turn(self, player):
+        current_player = self.get_current_player()
+        if player != current_player:
+            print(f"It's not {player.name}'s turn to pass.")
+            return
+        
+        if not self.pile:
+            print(f"{player.name} cannot pass to start the round. Must play a card or set of cards.")
+            return
+        
+        self.consecutive_passes += 1
+        print(f"{player.name} has passed (Consecutive passes: {self.consecutive_passes}).")
+        self.current_player_index = (self.current_player_index + 1) % len(self.players)
+
+        # Check if the round has ended
+        if self.consecutive_passes == len(self.players) - 1:
+            # The round ends when all other players have passed after the last play
+            last_player_index = (self.current_player_index - 1 + len(self.players)) % len(self.players) # Initialize local variable "last_player_index" as a number to be used to determine "last_player"
+            last_player = self.players[last_player_index]
+            print(f"Round over. {last_player.name} leads the next round.")
+            # Set all of the global variables back to initial state
+            self.pile = []
+            self.current_play_rank = None
+            self.current_play_count = None
+            self.threes_played_this_round = 0
+            self.consecutive_passes = 0
+            # Set the "current_player_index" to the "last_player_index" in this method
+            self.current_player_index = last_player_index # The leader starts the next round
+
     # Create a method for the game pile
     def get_game_pile(self):
+        # When method is called anywhere in the game state it returns the list "pile" that we initiated earlier
         return self.pile
     
     # Create a method to check for the game over state
     def is_game_over(self):
-        players_with_cards = 0
+        players_with_cards = 0 # Initialize the local variable counter "players_with_cards"
+        # Loops through the "players" from __init__ and creates a variable
         for player in self.players:
+            # Then checks the length of each players hand if it is greater than 0
             if len(player.get_hand().cards) > 0:
                 players_with_cards += 1
+        # When method is called it does the check whether game is over and returns true or false
         return players_with_cards == 1
+
+class GameLoop:
+    def __init__(self, game_state):
+        self.game_state = game_state
+        game_state.determine_starting_player()
+        
+    def run(self):
+        while not self.game_state.is_game_over():
+            self.current_player = self.game_state.get_current_player()
+            print(f"\nIt's {self.current_player.name}'s turn.")
+            print("Player's action (Play or Pass):")
+            current_player_action = input().strip().lower() # Asks the player for input then strips the trailing white space and makes it all lower case
+            if current_player_action == "pass":
+                self.game_state.pass_turn(self.current_player)
+            elif current_player_action == "play":
+                cards_to_play = self.get_cards_to_play_from_input(self.current_player)
+                if cards_to_play:
+                    self.game_state.play_turn(self.current_player, cards_to_play)
+                else:
+                    print("You must select cards to play.")
+            else:
+                print("Invalid action. Please enter 'Play' or 'Pass'.")
+            
+            # The while loop condition will check if the game is over in the next iteration
+
+    def get_cards_to_play_from_input(self, player):
+        print(f"{player.name}'s hand: {[str(card) for card in player.hand.cards]}")
+        card_strings = input("Enter the cards you want to play (e.g., H5 S5): ").strip().upper().split() # Asks the user for input of cards then strips the trailing white space then makes the letters upper case because that is what the method is looking for and then splits it by " "
+        cards_to_play = []
+        hand_copy = player.hand.cards[:] # Create a copy to track used cards
+        
+        if not card_strings:
+            print("You must enter cards to play or 'Pass'.")
+            return [] # Return an empty list to signal no cards played
+        
+        for s in card_strings:
+            suit = None
+            rank = None
+            rank_str = "".join(char for char in s if char.isdigit() or char.isalpha()) # Handled combined input
+            for char in s:
+                if char.isalpha():
+                    suit = char
+                    break
+
+            rank_map = {'2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14}
+            rank = rank_map.get(rank_str)
+            
+            # Map the suit character (H, S, D, C) to the suit string
+            suit_map = {'H': 'Hearts', 'S': 'Spades', 'D': 'Diamonds', 'C': 'Clubs'}            
+            if suit and rank:
+                suit_name = suit_map.get(suit)
+                if suit_name:
+                    card_to_find = Card(suit_name, rank)
+                    if card_to_find in hand_copy:
+                        cards_to_play.append(card_to_find)
+                        hand_copy.remove(card_to_find) # Remove the used card from the copy
+                    else:
+                        print(f"You don't have another {card_to_find} in your hand.")
+                else:
+                    print(f"Invalid card format: {suit}")
+            else:
+                print(f"Invalid card format: {s}")
+        return cards_to_play
 
 def test_initial_state():
     player_names = ["Alice", "Bob", "Charlie"]
