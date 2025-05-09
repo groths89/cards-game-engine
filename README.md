@@ -28,52 +28,70 @@ The initial development will focus on creating the fundamental building blocks:
 
 ## Features
 
-- **Standard 52-card deck:** Includes creation, shuffling, and dealing of a standard deck of cards.
-- **Multiple players:** Supports gameplay with multiple players.
-- **Turn-based gameplay:** Manages the progression of turns between players.
-- **Card playing validation:** Enforces rules for playing cards (same rank, higher rank to play on the pile).
-- **"Stall" card (3):** Detects when a 3 is played as a stall.
-- **"Clearing" second 3:** Implements the rule where the second 3 played in a round clears the pile and gives the turn to the player who played it (acting as a 2).
-- **Ace of Spades starts:** Implements the rule where the player holding the Ace of Spades goes first.
-- **Handling rounds of play:** Implements logic for consecutive passes and the start of a new round.
-- **Player input:** Allows players to enter "Play" or "Pass" as their action and specify cards to play via text input.
-- **Basic game over detection:** Determines when the game ends (only one player left with cards).
-- **Game loop:** Implements a main game loop to drive the game flow based on player actions and game state.
-- **Card input parsing:** Robustly parses player input to identify cards to play, handling different formats and validating against the player's hand.
-- **Basic game state tracking:** Keeps track of the current player, the cards on the pile, and the current play rank and count.
+- **Core Game Mechanics:**
+  - Standard 52-card deck: Creation, shuffling, and dealing.
+  - Multiple players: Supports gameplay with multiple players (4-8+ recommended).
+  - Turn-based gameplay: Manages the progression of turns.
+  - Card playing validation: Enforces rules for playing cards (matching rank, higher rank to play on the pile).
+  - Passing turns.
+  - Clearing the play pile.
+  - Handling rounds of play: Logic for consecutive passes and starting new rounds.
+- **"Asshole" Specific Rules:**
+  - Card ranking: 3 (low) - 2 (high, special).
+  - Ace of Spades starts: The player with the Ace of Spades goes first.
+  - "Stall" card (3): Detects when a 3 is played.
+  - "Clearing" second 3: Implements the rule where the second 3 played in a round clears the pile, and the player who played it leads the next round.
+- **Player Interaction:**
+  - Player input: Allows players to enter "Play" or "Pass" actions.
+  - Card input parsing: Robustly parses player input to identify cards to play from their hand.
+- **Game State:**
+  - Basic game state tracking: Keeps track of the current player, cards on the pile, and the current play rank/count.
+  - Basic game over detection: Determines when the game ends (one player left with cards).
+- **Game Flow:**
+  - Game loop: Implements a main game loop to drive the game flow.
 
-## Next Steps
+## Planned Features
 
-- Tracking the order in which players go out to determine their rank
-- Tracking players who are out of the game.
-- Determining the order in which players go out (ranking).
-- Implementing the `handle_player_out()` method in the game loop.
-- Implementing the `end_game()` method to declare the "Asshole".
-- Potentially adding support for more complex passing scenarios.
-- More comprehensive unit tests.
-- Development of a graphical user interface (UI).
+The following features are planned for future implementation:
+
+- More "Asshole" Rules:
+  - 2s can be played anytime
+  - If all players play the same rank, the pile is cleared.
+  - Passing twice starts a new round
+  - Correct 2 value
+  - Playing the same rank on top of the rank skips the next player
+- Ranking and Game End:
+  - Tracking the order in which players finish (ranking).
+  - Tracking players who are out of the game.
+  - Implementing the `handle_player_out()` method in the game loop.
+  - Implementing the `end_game()` method to declare the "Asshole".
+- User Interface:
+  - Graphical user interface (GUI) development.
+- Other Improvements:
+  - Potentially adding support for more complex passing scenarios.
+  - More comprehensive unit tests.
 
 ## How to Use
 
-1.  **Clone the repository** (if you haven't already).
-2.  **Run the game** (you'll need to add code to instantiate and run the game loop, which is the next step in development).
+1.  **Clone the repository:**
 
     ```bash
-    python card_game_engine.py
+    git clone https://github.com/groths89/cards-game-engine
+    cd card-game-engine
+    ```
+
+2.  **Run the game:**
+
+    ```bash
+    python -m main # Run the main.py module
     ```
 
 ## Development Status
 
-This project is currently under development. The following features are planned for future implementation:
+This project is currently under development.
 
-- Tracking the order in which players go out to determine their rank
-- Tracking players who are out of the game.
-- Determining the order in which players go out (ranking).
-- Implementing the `handle_player_out()` method in the game loop.
-- Implementing the `end_game()` method to declare the "Asshole".
-- Potentially adding support for more complex passing scenarios.
-- More comprehensive unit tests.
-- Development of a graphical user interface (UI).
+- Fix if 3 of the same rank is played it will allow the fourth of that rank to be played
+- Add if a player has the last of the rank played it will allow them to play and not have to be next player
 
 ## Development Environment
 

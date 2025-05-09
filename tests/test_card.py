@@ -2,7 +2,7 @@ import unittest
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from card_game_engine import Card
+from main import Card
 
 class TestCardClass(unittest.TestCase):
     def test_card_creation(self):

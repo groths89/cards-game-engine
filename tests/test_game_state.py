@@ -2,7 +2,7 @@ import unittest
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from card_game_engine import GameState, Player, Card, Deck # Import necessary classes
+from main import GameState, Player, Card, Deck # Import necessary classes
 
 class TestGameStateClass(unittest.TestCase):
     def setUp(self):
