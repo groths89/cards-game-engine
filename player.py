@@ -7,13 +7,23 @@ class Player:
         self.hand = Hand()
         self.rank = None
         self.is_active = True
+        self.is_out = False
 
     def add_card(self, card):
         self.hand.add_card(card)
 
     def play_cards(self, cards_to_play):
-        self.hand.play_cards(cards_to_play)
+        """Removes the specified cards from the player's hand."""
+        for card in cards_to_play:
+            if card in self.hand.cards:
+                self.hand.remove_card(card)
+            else:
+                print(f"Error: {self.name} tried to play a card they don't have: {card}")
 
+    def has_card(self, card):
+        """Checks if the player has a specific card in their hand."""
+        return card in self.hand.cards
+    
     def get_hand(self):
         return self.hand
     

@@ -5,6 +5,13 @@ class Hand:
     def add_card(self, card):
         self.cards.append(card)
     
+    def remove_card(self, card_to_remove):
+        """Removes a specific card from the hand."""
+        if card_to_remove in self.cards:
+            self.cards.remove(card_to_remove)
+        else:
+            print(f"Error: Tried to remove a card not in hand: {card_to_remove}")
+
     def __str__(self):
         return ", ".join(str(card) for card in self.cards)
     

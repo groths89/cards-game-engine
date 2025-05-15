@@ -16,8 +16,14 @@ class Deck:
 
     def deal_card(self):
         if self.cards:
-            return self.cards.pop() # Remove and return the top card
+            return self.cards.pop(0) # Remove and return the top card
         return None
     
     def __len__(self):
         return len(self.cards)
+    
+    def __str__(self):
+        return ", ".join(str(card) for card in self.cards)
+
+    def __repr__(self):
+        return f"Deck(cards={[repr(card) for card in self.cards]})"

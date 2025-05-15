@@ -92,6 +92,11 @@ This project is currently under development.
 
 - Fix if 3 of the same rank is played it will allow the fourth of that rank to be played
 - Add if a player has the last of the rank played it will allow them to play and not have to be next player
+- Fix if all 4 of a rank is played it should clear to the player that played the last of the rank
+- Fix if a player plays a double of a rank it should not skip the next player
+- Fix if all players passed then it should start with the player that last played a card
+- Fix it does not clear the skip when setting the should_skip_player to true
+- Fix it going to the next player every time even if it shouldn't
 
 ## Development Environment
 
