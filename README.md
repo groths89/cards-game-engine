@@ -7,7 +7,6 @@ This project aims to build a versatile card game engine, starting with support f
 ## Initial Scope - "Asshole" (Single Round, Local Play)
 
 - **Number of Players:** 4-8+
-- **Card Ranking:** 3 (low) - 2 (high, special)
 - **Gameplay Mechanics:**
   - Dealing cards
   - Players taking turns playing sets of cards of the same rank.
@@ -15,7 +14,6 @@ This project aims to build a versatile card game engine, starting with support f
   - Passing turns.
   - Clearing the play pile.
   - Determining the winner (first to run out of cards).
-- **Initial Exclusions:** Special card rules (2s, potentially 3s), persistent ranks between rounds, web interface.
 
 ## First Steps - Core Components
 
@@ -31,45 +29,41 @@ The initial development will focus on creating the fundamental building blocks:
 - **Core Game Mechanics:**
   - Standard 52-card deck: Creation, shuffling, and dealing.
   - Multiple players: Supports gameplay with multiple players (4-8+ recommended).
-  - Turn-based gameplay: Manages the progression of turns.
+  - Turn-based gameplay: Manages the progression of turns, ensuring only active players participate.
   - Card playing validation: Enforces rules for playing cards (matching rank, higher rank to play on the pile).
-  - Passing turns.
-  - Clearing the play pile.
-  - Handling rounds of play: Logic for consecutive passes and starting new rounds.
+  - Passing turns: Allows players to pass if they cannot or choose not to play. Consecutive passes by all other active players clear the pile.
+  - Clearing the play pile: Occurs when a player plays all four cards of a rank or when all other active players pass consecutively. The player who cleared the pile leads the next play.
+  - Handling rounds of play: Manages the flow of turns within a single round.
 - **"Asshole" Specific Rules:**
   - Card ranking: 3 (low) - 2 (high, special).
   - Ace of Spades starts: The player with the Ace of Spades goes first.
-  - "Stall" card (3): Detects when a 3 is played.
-  - "Clearing" second 3: Implements the rule where the second 3 played in a round clears the pile, and the player who played it leads the next round.
+  - "Stall" card (3): Detects when a 3 is played, resetting the current play rank.
+  - Clearing with the second 3: Implements the rule where playing a 3 resets the pile's rank.
 - **Player Interaction:**
   - Player input: Allows players to enter "Play" or "Pass" actions.
   - Card input parsing: Robustly parses player input to identify cards to play from their hand.
 - **Game State:**
-  - Basic game state tracking: Keeps track of the current player, cards on the pile, and the current play rank/count.
-  - Basic game over detection: Determines when the game ends (one player left with cards).
+  - Comprehensive game state tracking: Keeps track of the current player, cards on the pile, the current play rank/count, and active/inactive players.
+  - Game over detection: Determines when the game ends (only one active player remains).
+  - Tracking player ranking: Records the order in which players run out of cards.
 - **Game Flow:**
-  - Game loop: Implements a main game loop to drive the game flow.
+  - Main game loop: Drives the game flow, handling player turns and actions.
+  - Handling players going out: Correctly marks players as out and records their rank.
+  - End game logic: Determines the "Asshole" (last player out) and displays the final rankings.
 
 ## Planned Features
 
 The following features are planned for future implementation:
 
 - More "Asshole" Rules:
-  - 2s can be played anytime
-  - If all players play the same rank, the pile is cleared.
-  - Passing twice starts a new round
-  - Correct 2 value
-  - Playing the same rank on top of the rank skips the next player
-- Ranking and Game End:
-  - Tracking the order in which players finish (ranking).
-  - Tracking players who are out of the game.
-  - Implementing the `handle_player_out()` method in the game loop.
-  - Implementing the `end_game()` method to declare the "Asshole".
+  - Implement special rules for the card '2' (pile clear).
+  - Persistent ranks and card passing between rounds based on the previous round's rankings.
 - User Interface:
   - Graphical user interface (GUI) development.
 - Other Improvements:
-  - Potentially adding support for more complex passing scenarios.
+  - Potentially adding support for more complex passing scenarios or rule variations.
   - More comprehensive unit tests.
+  - Deployment as a web application.
 
 ## How to Use
 
@@ -93,10 +87,7 @@ This project is currently under development.
 - Fix if 3 of the same rank is played it will allow the fourth of that rank to be played
 - Add if a player has the last of the rank played it will allow them to play and not have to be next player
 - Fix if all 4 of a rank is played it should clear to the player that played the last of the rank
-- Fix if a player plays a double of a rank it should not skip the next player
-- Fix if all players passed then it should start with the player that last played a card
-- Fix it does not clear the skip when setting the should_skip_player to true
-- Fix it going to the next player every time even if it shouldn't
+- Fix when a player goes out the passing gets out of sync
 
 ## Development Environment
 

@@ -20,6 +20,24 @@ class Card:
         }
         return rank_values.get(self.rank)
     
+    def string_to_card(self, card_str):
+        if len(card_str) < 2:
+            return None
+        
+        suit_char = card_str[0].upper()
+        rank_str = card_str[1:]
+
+        suit_map = {'H': 'Hearts', 'D': 'Diamonds', 'C': 'Clubs', 'S': 'Spades'}
+        rank_map = {'2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, 'T': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14}
+
+        suit = suit_map.get(suit_char);
+        rank = rank_map.get(rank_str)
+
+        if suit and rank:
+            return Card(suit, rank)
+        else:
+            return None
+
     def __eq__(self, other):
         if not isinstance(other, Card):
             return NotImplemented

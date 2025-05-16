@@ -1,6 +1,6 @@
-from game_loop import GameLoop
-from game_state import GameState
-from player import Player
+from game_engine.game_loop import GameLoop
+from game_engine.game_state import GameState
+from game_engine.player import Player
 
 class AssholeGame(GameState):
     def __init__(self, players):
@@ -58,10 +58,10 @@ class AssholeGame(GameState):
         current_player = self.get_current_player()
         if current_player != player:
             print(f"It's not {player.name}'s turn.")
-            return False
+            return
         if not cards_to_play:
             self.pass_turn(player) # Delegate to the pass_turn method
-            return True
+            return
         
         if cards_to_play:
             played_rank = cards_to_play[0].rank
@@ -70,7 +70,7 @@ class AssholeGame(GameState):
             for card_to_play in cards_to_play:
                 if card_to_play not in player.get_hand().cards:
                     print(f"{player.name} does not have the card {card_to_play} in their hand.")
-                    return False
+                    return
 
             # --- Handle 2s (Clearing Card) ---
             if played_rank == 2:
@@ -78,7 +78,7 @@ class AssholeGame(GameState):
                 player.play_cards(cards_to_play)
                 self.clear_pile()
                 self.current_player_index = self.players.index(player)
-                return True
+                return
 
             # --- Detect and Handle 3 plays ---
             if played_rank == 3:
@@ -89,11 +89,14 @@ class AssholeGame(GameState):
                 self.pile.extend(cards_to_play)
                 self.consecutive_passes = 0 # Reset passes on a successful play
 
+
                 if self.threes_played_this_round >= 2:
                     print("Second 3 played! Pile cleared. It starts with the player who played the second 3.")
                     self.clear_pile()
                     self.current_player_index = self.players.index(player) # It starts with the current player
-                    return True # End the turn after playing a 3 for now
+                    return # End the turn after playing a 3 for now
+                else:
+                    self.next_player()
 
             # --- Handle non-3, non-2 plays ---
             if not self.pile:
@@ -104,6 +107,7 @@ class AssholeGame(GameState):
                 self.current_play_count = len(cards_to_play)
                 self.consecutive_passes = 0 # Reset passes on a successful play
                 self.cards_of_rank_played[played_rank] = played_count
+                self.next_player()
             elif len(cards_to_play) == self.current_play_count:
                 played_value = cards_to_play[0].get_value()
                 if played_value == self.current_play_rank:
@@ -127,6 +131,8 @@ class AssholeGame(GameState):
                         return True
                     else:
                         self.should_skip_next_player = True
+                        self.next_player(self.should_skip_next_player)
+                        self.should_skip_next_player = False
 
                 elif played_value > self.current_play_rank:
                     print(f"{player.name} has played {cards_to_play}.")
@@ -134,6 +140,7 @@ class AssholeGame(GameState):
                     self.pile.extend(cards_to_play)
                     self.current_play_rank = played_value
                     self.current_play_count = len(cards_to_play)
+                    self.next_player()
                     self.consecutive_passes = 0 # Reset passes on a successful play
                     self.same_rank_streak = 1
                     self.cards_of_rank_played[played_rank] = played_count #track
@@ -162,9 +169,15 @@ class AssholeGame(GameState):
         
         self.consecutive_passes += 1
         print(f"{player.name} has passed (Consecutive passes: {self.consecutive_passes}).")
+        self.next_player()
+        
+        active_players = 0
+        for player in self.players:
+            if player.is_active:
+                active_players += 1
 
         # Check if the round has ended
-        if self.consecutive_passes == len(self.players):
+        if self.consecutive_passes >= active_players and active_players > 1:
             # The round ends when all other players have passed after the last play
             last_player_index = (self.current_player_index - 1 + len(self.players)) % len(self.players) # Initialize local variable "last_player_index" as a number to be used to determine "last_player"
             last_player = self.players[last_player_index]
@@ -195,6 +208,38 @@ class AssholeGame(GameState):
                 player.rank = self.player_went_out
                 rank_name = self.get_rank_name(player.rank, len(self.players))
                 print(f"{player.name} went out and he is the {rank_name}")
+
+    def get_num_active_players(self):
+        num_active_players = 0 # Initialize the local variable counter "num_active_players"
+        # Loops through the "players" from __init__ and creates a variable
+        for player in self.players:
+            # Then checks whether the attribute of a player "is_active" and adds 1 for each player that has "is_active" set to true
+            if player.is_active:
+                num_active_players += 1
+        # When method is called it does the check whether game is over and returns true or false
+        return num_active_players    
+
+    def end_game(self):
+        last_player_out = None
+        first_player_out = None
+        final_rankings = sorted(self.players, key=lambda p: p.rank if p.rank else float('inf'))
+        num_players = len(self.players)
+        
+        # Print the final ranks of all players
+        print("\n---- Final Rankings ----")
+        for player in final_rankings:
+            rank_name = self.get_rank_name(player.rank, len(self.players)) if player.rank is not None else "Still Playing"
+            print(f"{player.name}: {rank_name}")
+            if player.rank == num_players:
+                last_player_out = player.name
+            elif player.rank == 1:
+                first_player_out = player.name
+
+        # Announce the results
+        if last_player_out:
+            print(f"\n{last_player_out} is the Asshole!")
+        if first_player_out:
+            print(f"{first_player_out} is the President!")
 
     def get_rank_name(self, rank, num_players):
         if rank == 1:

@@ -1,7 +1,7 @@
-from deck import Deck
-from player import Player
+from .deck import Deck
+from .player import Player
 
-from utils import get_rank_name
+from .utils import get_rank_name
 class GameState:
     def __init__(self, players):
         self.deck = Deck()
@@ -93,11 +93,4 @@ class GameState:
     
     # Create a method to check for the game over state
     def is_game_over(self):
-        num_active_players = 0 # Initialize the local variable counter "num_active_players"
-        # Loops through the "players" from __init__ and creates a variable
-        for player in self.players:
-            # Then checks whether the attribute of a player "is_active" and adds 1 for each player that has "is_active" set to true
-            if player.is_active:
-                num_active_players += 1
-        # When method is called it does the check whether game is over and returns true or false
-        return num_active_players == 1
+        return self.get_num_active_players() <= 1

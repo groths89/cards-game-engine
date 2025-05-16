@@ -1,5 +1,5 @@
-from games.asshole import AssholeGame
-from game_loop import GameLoop
+from game_engine.games.asshole import AssholeGame
+from game_engine.game_loop import GameLoop
 
 if __name__ == "__main__":
     players = ["Alice", "Bob", "Charlie", "Larry"]

@@ -1,7 +1,7 @@
 import sys
 
-from card import Card
-from game_state import GameState
+from .card import Card
+from .game_state import GameState
 
 class GameLoop:
     def __init__(self, game_state):
@@ -11,6 +11,7 @@ class GameLoop:
         """
         The main loop that drives the game.
         """
+        print(f"Game Over at start: {self.game_state.is_game_over()}")
         self.player_went_out = 0
 
         while not self.game_state.is_game_over():
@@ -29,36 +30,18 @@ class GameLoop:
                 cards_to_play = self.get_cards_to_play(current_player)
                 if cards_to_play:
                     try:
-                        is_valid = self.game_state.play_turn(current_player, cards_to_play)
-                        if is_valid:
-                            self.game_state.handle_player_out()
-                            if not self.game_state.is_game_over() and not self.game_state.pile_cleared_this_turn:
-                                if self.game_state.should_skip_next_player:
-                                    self.game_state.next_player(self.game_state.should_skip_next_player)
-                                else:
-                                    self.game_state.next_player()
+                        self.game_state.play_turn(current_player, cards_to_play)
+                        self.game_state.handle_player_out()
                     except ValueError as e:
                         print(f"Invalid play: {e}")
                 else:
                     print("No cards selected to play.")
             elif action == "pass":
                 self.game_state.pass_turn(current_player)
-                if not self.game_state.is_game_over():
-                    self.game_state.next_player()
             else:
                 print("Invalid action.")
 
-        winner = self.game_state.get_winner()
-        if winner:
-            print(f"\n{winner.name} wins!")
-        else:
-            print("\nGame over, no winner determined.")
-
-        # Print the final ranks of all players
-        print("\nFinal Rankings:")
-        for player in sorted(self.game_state.players, key=lambda p: p.rank if p.rank else float('inf')):  # Sort by rank, inactive last
-            rank_name = self.game_state.get_rank_name(player.rank, len(self.game_state.players)) if player.rank else "Not Finished"
-            print(f"{player.name}: {rank_name}")
+        self.game_state.end_game()
 
     def get_player_action(self, player):
         """
