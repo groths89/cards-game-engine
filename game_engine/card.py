@@ -1,8 +1,32 @@
+class Suit:
+    CLUBS = "C"
+    DIAMONDS = "D"
+    HEARTS = "H"
+    SPADES = "S"
+
+class Rank:
+    TWO = "2"
+    THREE = "3"
+    FOUR = "4"
+    FIVE = "5"
+    SIX = "6"
+    SEVEN = "7"
+    EIGHT = "8"
+    NINE = "9"
+    TEN = "T"
+    JACK = "J"
+    QUEEN = "Q"
+    KING = "K"
+    ACE = "A"
+
 class Card:
     def __init__(self, suit, rank):
         self.suit = suit
         self.rank = rank
 
+    def to_string(self):
+        return f"{self.rank}{self.suit}"
+    
     def __str__(self):
         # How we want the card to be displayed
         rank_map = {11: 'J', 12: 'Q', 13: 'K', 14: 'A'}

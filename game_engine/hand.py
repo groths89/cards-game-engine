@@ -30,5 +30,8 @@ class Hand:
             played_cards.append(self.cards.pop(index))
         return played_cards
     
+    def clear(self):
+        self.cards = []
+
     def get_cards_by_rank(self, rank):
         return [card for card in self.cards if card.rank == rank]

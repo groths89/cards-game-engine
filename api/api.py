@@ -32,6 +32,13 @@ def manage_game_room():
     player_name = data.get('player_name', '').strip()
     game_type = data.get('game_type', '').lower()
     action = data.get('action')
+    player_id = str(uuid.uuid4())
+    new_player = Player(player_name, player_id=player_id)
+
+    print("--- Backend Manage Room Debug ---")
+    print(f"Action: {action}, Room Code: {room_code}, Player Name: {player_name}, Game Type: {game_type}")
+    print(f"Generated Player ID for THIS manage_game_room request: {player_id}")
+    print("--- End Backend Manage Room Debug ---")
 
     # --- Basic Validation ---
     if not room_code or len(room_code) != 4:
@@ -53,15 +60,14 @@ def manage_game_room():
     if action == 'create':
         if game:
             # If game already exists, it must match the requested type and not be started
-            if isinstance(game, GameClass) and not game.is_game_started:
-                pass
-            else:
-                return jsonify({'error': f'Room "{room_code}" already exists and is in use.'}), 409 # Conflict
+            return jsonify({'error': f'Room "{room_code}" already exists and is in use.'}), 409 # Conflict
         else:
-            print(f"Creating new {game_type} game for room: {room_code}")
             game = GameClass(players=[])
             active_games[room_code] = game
             game.room_code = room_code
+            game.host_id = player_id
+            print(f"Backend: Host ID set for room {room_code}: {game.host_id}")
+            print(f"Creating new {game_type} game for room: {room_code}")
 
     # --- Handle 'Join' Action ---
     elif action == 'join':
@@ -73,13 +79,35 @@ def manage_game_room():
             return jsonify({'error': 'Game has already started in this room. Cannot join.'}), 403 # Forbidden
         
     # -- Common Player Joining Logic (for both create and join) ---
+    # Check if player name is already taken in the room
     if any(p.name == player_name for p in game.players):
-        return jsonify({'error': f'Name "{player_name}" is already taken in this room.'}), 400
-    if len(game.players) >= 10:
+        # If the player ID matches an existing player, it means they're rejoining
+        existing_player = next((p for p in game.players if p.player_id == player_id), None)
+        if existing_player and existing_player.name == player_name:
+            # Player is rejoining with the same ID and name, allow it
+            print(f"Player {player_name} ({player_id}) rejoining room {room_code}.")
+            # You might want to update their session or simply confirm their presence
+            return jsonify({
+                'message': f'Successfully re-joined room {room_code} as {player_name}',
+                'game_id': room_code,
+                'player_id': player_id,
+                'player_name': player_name
+            }), 200
+        else:
+            # Name taken by a different player or same ID with different name (unlikely for uuid4)
+            return jsonify({'error': f'Name "{player_name}" is already taken in this room.'}), 400
+
+    # Check for room capacity
+    if len(game.players) >= game.MAX_PLAYERS: # Use game.MAX_PLAYERS
         return jsonify({'error': 'This room is full.'}), 400
     
-    player_id = str(uuid.uuid4())
-    new_player = Player(player_name, player_id=player_id)
+    if new_player.player_id in [p.player_id for p in game.players]:
+        return jsonify({'error': 'Player with this ID already in room'}), 400
+    
+    if action == 'create' and game.host_id == new_player.player_id:
+        pass    
+    
+
     game.players.append(new_player)
     player_id_map[player_id] = player_name
 
@@ -91,6 +119,72 @@ def manage_game_room():
         'player_id': player_id,
         'player_name': player_name
     }), 200
+
+# /leave_room endpoint
+@app.route('/leave_room', methods=['POST'])
+def leave_room():
+    data = request.json
+    room_code = data.get('room_code', '').upper()
+    player_id = data.get('player_id')
+
+    game = active_games.get(room_code)
+
+    if not game:
+        return jsonify({'error': 'Game room not found.'}), 404
+
+    # Remove player from the game's players list
+    player_removed = False
+    # Filter out the player by ID
+    game.players = [p for p in game.players if p.player_id != player_id]
+    
+    if not player_removed: # This logic needs adjustment based on how game.players is structured
+        # Assuming game.players is a list of Player objects directly
+        initial_player_count = len(game.players)
+        game.players = [p for p in game.players if p.player_id != player_id]
+        if len(game.players) < initial_player_count:
+            player_removed = True
+        else:
+            return jsonify({'error': 'Player not found in this room.'}), 404
+
+    # Check if the host left. If the host leaves, delete the room immediately.
+    # OR, if the room is now empty, delete it.
+    if game.host_id == player_id or not game.players:
+        del active_games[room_code]
+        print(f"Room {room_code} deleted because host ({player_id}) left or room is empty.")
+        return jsonify({'message': 'You left the room. Room deleted (host left or room empty).'}), 200
+    
+    # If the host didn't leave and room is not empty, update state
+    # If the game is already started, you might want to handle player leaving differently (e.g., mark as inactive)
+    if game.is_game_started:
+        # Here you might want to check if the current player left, and advance turn
+        # Or mark player as 'inactive'
+        # For simplicity, we just remove them from game.players list.
+        pass # The filtering above already handles removal
+    
+    print(f"Player {player_id} left room {room_code}. Current players: {[p.name for p in game.players]}")
+    return jsonify({'message': 'Successfully left the room.'}), 200
+
+# /delete_room endpoint (only for host)
+@app.route('/delete_room', methods=['POST'])
+def delete_room():
+    data = request.json
+    room_code = data.get('room_code', '').upper()
+    player_id = data.get('player_id')
+
+    game = active_games.get(room_code)
+
+    if not game:
+        return jsonify({'error': 'Game room not found.'}), 404
+
+    # Authorization: Only the host can delete the room
+    if game.host_id != player_id:
+        return jsonify({'error': 'Only the host can delete the room.'}), 403
+
+    # Delete the room from active_games
+    del active_games[room_code]
+    print(f"Host ({player_id}) explicitly deleted room {room_code}.")
+    return jsonify({'message': f'Room {room_code} has been successfully deleted.'}), 200
+
 
 @app.route('/start_game', methods=['POST'])
 def start_game():
@@ -112,13 +206,26 @@ def start_game():
 
 @app.route('/start_game_round', methods=['POST'])
 def start_game_round():
-    data.request.get_json()
+    data = request.json
     room_code = data.get('room_code', '').upper()
+    player_id = data.get('player_id')
+    player_id_from_frontend = data.get('player_id') 
 
     game = active_games.get(room_code)
+
+    print("\n--- Backend Start Game Round Debug ---")
+    print(f"Request for Room: {room_code}")
+    print(f"Player ID from Frontend (sent in POST body): {player_id_from_frontend}")
+    print(f"Stored Game Host ID (from active_games[{room_code}]): {game.host_id if game else 'N/A'}")
+    print(f"Comparison: {game.host_id == player_id_from_frontend if game else 'N/A'}")
+    print("--- End Backend Start Game Round Debug ---\n")
+
     if not game:
         return jsonify({'error': 'Game room not found.'}), 404 # Not Found
     
+    if game.host_id != player_id:
+        return jsonify({'error': 'Only the host can start the game.'}), 403
+
     try:
         if len(game.players) < game.MIN_PLAYERS:
             return jsonify({'error': f'Need at least {game.MIN_PLAYERS} players to start. Current: {len(game.players)}'}), 400
@@ -196,6 +303,11 @@ def _get_game_state_for_player(game, player_id):
     if not player:
         return None
     
+    all_players_data = [
+        {'name': p.name, 'id': p.player_id, 'is_active': p.is_active, 'hand_size': len(p.get_hand().cards), 'rank': p.rank}
+        for p in game.players
+    ]
+
     player_hand_cards_str = [card.to_string() for card in player.get_hand().cards]
 
     pile_cards_str = [card.to_string() for card in game.pile]
@@ -210,14 +322,17 @@ def _get_game_state_for_player(game, player_id):
 
     return {
         'room_code': game.room_code,
+        'host_id': game.host_id,
         'current_player': current_player_name,
         'pile': pile_cards_str,
         'your_hand': player_hand_cards_str,
-        'all_player_names': [p.name for p in game.players],
+        'all_players_data': all_players_data,
         'num_active_players': game.get_num_active_players(),
         'is_game_over': game.is_game_over(),
         'rankings': rankings_data,
-        'game_started': game.is_game_started
+        'game_started': game.is_game_started,
+        'MIN_PLAYERS': game.MIN_PLAYERS,
+        'MAX_PLAYERS': game.MAX_PLAYERS,
     }
 
 @app.route('/game_state', methods=['GET'])

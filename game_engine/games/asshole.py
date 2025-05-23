@@ -8,6 +8,7 @@ class AssholeGame(GameState):
 
     def __init__(self, players):
         super(AssholeGame, self).__init__(players)
+        self.host_id = None
         self.is_game_started = False
         self.deck.shuffle()
         self.special_card_rules = True
