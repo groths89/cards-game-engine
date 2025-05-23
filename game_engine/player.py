@@ -1,13 +1,15 @@
+import uuid
 from .hand import Hand
 
 
 class Player:
-    def __init__(self, name):
+    def __init__(self, name, hand=None, player_id=None):
         self.name = name
         self.hand = Hand()
         self.rank = None
         self.is_active = True
         self.is_out = False
+        self.player_id = player_id if player_id is not None else str(uuid.uuid4())
 
     def add_card(self, card):
         self.hand.add_card(card)
@@ -27,8 +29,27 @@ class Player:
     def get_hand(self):
         return self.hand
     
+    def __eq__(self, other):
+        if not isinstance(other, Player):
+            return NotImplemented
+        return self.player_id == other.player_id
+
+    def __hash__(self):
+        return hash(self.player_id)
+
     def __str__(self):
         return f"Player: {self.name}, Hand: {self.hand}"
     
     def __repr__(self):
         return f"Player(name='{self.name}', hand='{self.hand}')"
+    
+    # Method to represent player for API (e.g., in lists of players)
+    def to_dict(self):
+        return {
+            'name': self.name,
+            'id': self.player_id,
+            'is_active': self.is_active,
+            'is_out': self.is_out,
+            'rank': self.rank,
+            'hand_size': len(self.hand.cards)
+        }

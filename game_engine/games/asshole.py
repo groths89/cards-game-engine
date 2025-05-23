@@ -1,10 +1,14 @@
 from game_engine.game_loop import GameLoop
 from game_engine.game_state import GameState
 from game_engine.player import Player
-
+from game_engine.deck import Deck
 class AssholeGame(GameState):
+    MIN_PLAYERS = 4
+    MAX_PLAYERS = 10
+
     def __init__(self, players):
         super(AssholeGame, self).__init__(players)
+        self.is_game_started = False
         self.deck.shuffle()
         self.special_card_rules = True
         self.player_went_out = 0 # Counter to track when a player goes out
@@ -14,8 +18,46 @@ class AssholeGame(GameState):
         self.should_skip_next_player = False
         self.pile_cleared_this_turn = False
         self.cards_of_rank_played = {rank: 0 for rank in range(2, 15)} # Track how many of each rank have been played
+
+    def start_game(self):
+        """
+        Initializes and starts a new round of Asshole.
+        Call this when enough players have joined the room.
+        """
+        if len(self.players) < self.MIN_PLAYERS:
+            raise ValueError(f"Need at least {self.MIN_PLAYERS} players to start. Current: {len(self.players)}.")
+        if len(self.players) > self.MAX_PLAYERS:
+            raise ValueError(f"Cannot exceed {self.MAX_PLAYERS} players. Current: {len(self.players)}.")
+
+        if self.is_game_started:
+            raise ValueError("Game has already started.")
+        if len(self.players) < 2: # Or 3, 4 depending on your minimum player count
+            raise ValueError("Not enough players to start the game.")
+
+        print(f"Starting game in room {self.room_code} with players: {[p.name for p in self.players]}")
+
+        # Reset game state for a new round
+        self.deck = Deck() # Re-initialize a full deck
+        self.deck.shuffle()
+        for player in self.players:
+            player.hand.clear() # Clear existing hands
+            player.is_active = True
+            player.rank = None
+        self.pile = []
+        self.current_play_rank = None
+        self.current_play_count = 0
+        self.consecutive_passes = 0
+        self.threes_played_this_round = 0
+        self.same_rank_streak = 0
+        self.should_skip_next_player = False
+        self.pile_cleared_this_turn = False
+        self.cards_of_rank_played = {rank: 0 for rank in range(2, 15)}
+        self.player_went_out = 0 # Reset rank counter
+
         self.deal_all_cards()
         self.current_player_index = self.determine_starting_player()
+        self.is_game_started = True # Set to True once setup is complete
+        print(f"Game started! First player: {self.get_current_player().name}")
 
     # Create a method to deal all the cards to players
     def deal_all_cards(self):
@@ -222,9 +264,21 @@ class AssholeGame(GameState):
     def end_game(self):
         last_player_out = None
         first_player_out = None
+
+        print("\n---- Game Over! ----")
+
+        # Assign rank to the last remaining active player (the Asshole)
+        remaining_active_players = [p for p in self.players if p.is_active]
+        if remaining_active_players:
+            asshole_player = remaining_active_players[0]
+            self.player_went_out += 1
+            asshole_player.rank = self.player_went_out
+            asshole_player.is_active = False # Mark as inactive
+            print(f"{asshole_player.name} is the Asshole!")
+
         final_rankings = sorted(self.players, key=lambda p: p.rank if p.rank else float('inf'))
-        num_players = len(self.players)
-        
+        num_players = len(self.players) 
+
         # Print the final ranks of all players
         print("\n---- Final Rankings ----")
         for player in final_rankings:
@@ -235,11 +289,7 @@ class AssholeGame(GameState):
             elif player.rank == 1:
                 first_player_out = player.name
 
-        # Announce the results
-        if last_player_out:
-            print(f"\n{last_player_out} is the Asshole!")
-        if first_player_out:
-            print(f"{first_player_out} is the President!")
+        self.is_game_started = False # Reset game state after it ends
 
     def get_rank_name(self, rank, num_players):
         if rank == 1:
