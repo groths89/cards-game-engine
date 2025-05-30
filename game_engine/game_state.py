@@ -10,7 +10,7 @@ class GameState:
         self.current_play_rank = None
         self.current_play_count = None
         self.current_player_index = self.determine_starting_player()
-        self.game_over = False
+        self.status = "CLI_MODE"
     
     # Create a method that deals a card to each player in the list
     def deal_cards(self, num_cards):
@@ -33,9 +33,23 @@ class GameState:
 
     # Create a method to get the current player
     def get_current_player(self):
-        if self.players:
+        if self.players and 0 <= self.current_player_index < len(self.players):
             return self.players[self.current_player_index]
         return None
+    
+    def get_current_player_id(self):
+        player = self.get_current_player()
+        return player.player_id if player else None
+    
+    def get_player_by_id(self, player_id):
+        for player in self.players:
+            if player.player_id == player_id:
+                return player
+        return None
+    
+    def get_num_players(self):
+        """Returns the total number of players in the game."""
+        return len(self.players)
 
     def next_player(self, skip=False):
         """Advances to the next player's turn."""
@@ -91,6 +105,10 @@ class GameState:
         # When method is called anywhere in the game state it returns the list "pile" that we initiated earlier
         return self.pile
     
-    # Create a method to check for the game over state
+    @property
+    def is_game_started(self):
+        return self.status == "IN_PROGRESS"
+
+    @property
     def is_game_over(self):
-        return self.get_num_active_players() <= 1
+        return self.status == "FINISHED" # Use status attribute for clarity

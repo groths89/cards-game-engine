@@ -1,6 +1,7 @@
 import sys
 import os
 import uuid
+import random
 
 # Get the absolute path to the project root directory (one level up from 'api')
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -10,115 +11,155 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, session
 from flask_cors import CORS
 from game_engine.player import Player
 from game_engine.game_loop import GameLoop
 from game_engine.games.asshole import AssholeGame
 
 app = Flask(__name__)
-CORS(app)
+app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'my_dev_key')
+CORS(app, supports_credentials=True)
 
 # Dictionary to store the current game state (for a single game for now)
 active_games = {}
 player_id_map = {}
-game_state = {}
-game_loop = {}
+player_to_room_map = {}
 
-@app.route('/manage_game_room', methods=['POST'])
-def manage_game_room():
+def generate_unique_room_code(length=4):
+    characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+    while True:
+        code = ''.join(random.choice(characters) for _ in range(length))
+        if code not in active_games:
+            return code
+
+@app.route('/create_room', methods=['POST'])
+def create_room():
+    player_id = session.get('player_id')
+    if not player_id:
+        player_id = str(uuid.uuid4())
+        session['player_id'] = player_id # Store new ID in session
+
     data = request.get_json()
-    room_code = data.get('room_code', '').upper()
     player_name = data.get('player_name', '').strip()
     game_type = data.get('game_type', '').lower()
-    action = data.get('action')
-    player_id = str(uuid.uuid4())
-    new_player = Player(player_name, player_id=player_id)
 
-    print("--- Backend Manage Room Debug ---")
-    print(f"Action: {action}, Room Code: {room_code}, Player Name: {player_name}, Game Type: {game_type}")
-    print(f"Generated Player ID for THIS manage_game_room request: {player_id}")
-    print("--- End Backend Manage Room Debug ---")
-
-    # --- Basic Validation ---
-    if not room_code or len(room_code) != 4:
-        return jsonify({'error': 'Room code must be 4 characters.'}), 400
     if not player_name:
-        return jsonify({'error': 'Player name cannot be empty'}), 400
-    if action not in ['create', 'join']:
-        return jsonify({'error': 'Invalid action specified. Must be "create" or "join".'}), 400
-    
+        return jsonify({"success": False, "message": "Player name is required to create a room."}), 400
+
+    room_code = generate_unique_room_code()
+    host_id = player_id
+
     GameClass = None
     if game_type == 'asshole':
         GameClass = AssholeGame
     else:
-        return jsonify({'error': 'Invalid game type specified.'})
-    
+        return jsonify({'error': 'Invalid game type specified.'}), 400
+
+    try:
+        new_game = GameClass(room_code=room_code, host_id=host_id, game_type=game_type)
+        host_player_obj = Player(player_id=host_id, name=player_name)
+        new_game.add_player(host_player_obj)
+        new_game.status = "WAITING_FOR_PLAYERS"
+        active_games[room_code] = new_game
+        player_to_room_map[player_id] = room_code
+        game_state_payload = _get_game_state_for_player(new_game, host_id)
+        if not game_state_payload:
+            raise Exception("Failed to get initial game state for host.")
+
+        return jsonify({
+            'message': f'Successfully created room {room_code} as {player_name}',
+            'room_code': room_code,
+            'player_id': player_id,
+            'player_name': player_name,
+            'game_state': game_state_payload # Return initial game state
+        }), 201
+    except Exception as e:
+        print(f"Error creating room: {e}")
+        return jsonify({'error': f'Failed to create room: {str(e)}'}), 500
+
+@app.route('/join_room', methods=['POST'])
+def join_room():
+    player_id = session.get('player_id')
+    if not player_id:
+        player_id = str(uuid.uuid4())
+        session['player_id'] = player_id
+
+    data = request.get_json()
+    room_code = data.get('room_code', '').upper()
+    player_name = data.get('player_name', '').strip()
+
+    print(f"Join Lobby Request: Player ID from session: {player_id}, Room: {room_code}, Name: {player_name}")
+
+    if not room_code or len(room_code) != 4:
+        return jsonify({'error': 'Room code must be 4 characters.'}), 400
+    if not player_name:
+        return jsonify({'error': 'Player name cannot be empty'}), 400
+
     game = active_games.get(room_code)
 
-    # --- Handle 'Create' Action ---
-    if action == 'create':
-        if game:
-            # If game already exists, it must match the requested type and not be started
-            return jsonify({'error': f'Room "{room_code}" already exists and is in use.'}), 409 # Conflict
-        else:
-            game = GameClass(players=[])
-            active_games[room_code] = game
-            game.room_code = room_code
-            game.host_id = player_id
-            print(f"Backend: Host ID set for room {room_code}: {game.host_id}")
-            print(f"Creating new {game_type} game for room: {room_code}")
+    if not game:
+        return jsonify({'error': f'Room "{room_code}" does not exist.'}), 404
 
-    # --- Handle 'Join' Action ---
-    elif action == 'join':
-        if not game:
-            return jsonify({'error': f'Room "{room_code}" does not exist.'}), 404 # Not Found
-        if not isinstance(game, GameClass):
-            return jsonify({'error': f'Room "{room_code}" is hosting a different game type ({game.__class__.__name__}).'}), 409 # Conflict
-        if game.is_game_started:
-            return jsonify({'error': 'Game has already started in this room. Cannot join.'}), 403 # Forbidden
-        
-    # -- Common Player Joining Logic (for both create and join) ---
-    # Check if player name is already taken in the room
-    if any(p.name == player_name for p in game.players):
-        # If the player ID matches an existing player, it means they're rejoining
-        existing_player = next((p for p in game.players if p.player_id == player_id), None)
-        if existing_player and existing_player.name == player_name:
-            # Player is rejoining with the same ID and name, allow it
-            print(f"Player {player_name} ({player_id}) rejoining room {room_code}.")
-            # You might want to update their session or simply confirm their presence
-            return jsonify({
-                'message': f'Successfully re-joined room {room_code} as {player_name}',
-                'game_id': room_code,
-                'player_id': player_id,
-                'player_name': player_name
-            }), 200
-        else:
-            # Name taken by a different player or same ID with different name (unlikely for uuid4)
-            return jsonify({'error': f'Name "{player_name}" is already taken in this room.'}), 400
+    if game.status != "WAITING":
+        return jsonify({'error': 'Game has already started or is not joinable.'}), 403
 
-    # Check for room capacity
-    if len(game.players) >= game.MAX_PLAYERS: # Use game.MAX_PLAYERS
+    if len(game.players) >= game.MAX_PLAYERS:
         return jsonify({'error': 'This room is full.'}), 400
-    
-    if new_player.player_id in [p.player_id for p in game.players]:
-        return jsonify({'error': 'Player with this ID already in room'}), 400
-    
-    if action == 'create' and game.host_id == new_player.player_id:
-        pass    
-    
 
-    game.players.append(new_player)
-    player_id_map[player_id] = player_name
+    existing_player_in_game = next((p for p in game.players if p.player_id == player_id), None)
+    if existing_player_in_game:
+        if existing_player_in_game.name != player_name:
+            existing_player_in_game.name = player_name
+            print(f"Player {player_id} rejoining with updated name to {player_name} in room {room_code}.")
+        else:
+            print(f"Player {player_name} ({player_id}) rejoining room {room_code}.")
+        
+        player_to_room_map[player_id] = room_code # Ensure map is updated
+        game_state_payload = _get_game_state_for_player(game, player_id)
+        return jsonify({
+            'message': f'Successfully re-joined room {room_code} as {player_name}',
+            'room_code': room_code,
+            'player_id': player_id,
+            'player_name': player_name,
+            'game_state': game_state_payload
+        }), 200
 
-    print(f"Player {player_name} ({player_id}) {action}ed room {room_code}. Current players: {[p.name for p in game.players]}")
+    if player_id in player_to_room_map and player_to_room_map[player_id] != room_code:
+        return jsonify({"error": "Player already in another game. Please leave existing game first."}), 400
+
+    new_player = Player(player_name, player_id=player_id)
+    game.add_player(new_player)
+    player_to_room_map[player_id] = room_code
+
+    print(f"Player {player_name} ({player_id}) joined room {room_code}. Current players: {game.get_num_players()}")
+
+    game_state_payload = _get_game_state_for_player(game, player_id)
+    if not game_state_payload:
+        raise Exception("Failed to get initial game state for joining player.")
 
     return jsonify({
-        'message': f'Successfully {action}ed room {room_code} as {player_name}',
-        'game_id': room_code,
+        'message': f'Successfully joined room {room_code} as {player_name}',
+        'room_code': room_code,
         'player_id': player_id,
-        'player_name': player_name
+        'player_name': player_name,
+        'game_state': game_state_payload
     }), 200
+
+@app.route('/rooms', methods=['GET'])
+def get_room():
+    lobbies_data = []
+    for room_code, game in active_games.items():
+        lobbies_data.append({
+            "room_code": room_code,
+            "game_type": game.game_type,
+            "host_name": game.get_player_by_id(game.host_id).name if game.host_id else "Unknown",
+            "current_players": game.get_num_players(),
+            "max_players": game.MAX_PLAYERS,
+            "status": game.status,
+            "game_started": game.is_game_started
+        })
+    return jsonify(lobbies_data), 200
 
 # /leave_room endpoint
 @app.route('/leave_room', methods=['POST'])
@@ -132,23 +173,17 @@ def leave_room():
     if not game:
         return jsonify({'error': 'Game room not found.'}), 404
 
-    # Remove player from the game's players list
-    player_removed = False
-    # Filter out the player by ID
-    game.players = [p for p in game.players if p.player_id != player_id]
+    player_to_remove = game.get_player_by_id(player_id)
+    if not player_to_remove:
+        return jsonify({'error': 'Player not found in this room.'}), 404
     
-    if not player_removed: # This logic needs adjustment based on how game.players is structured
-        # Assuming game.players is a list of Player objects directly
-        initial_player_count = len(game.players)
-        game.players = [p for p in game.players if p.player_id != player_id]
-        if len(game.players) < initial_player_count:
-            player_removed = True
-        else:
-            return jsonify({'error': 'Player not found in this room.'}), 404
+    game.remove_player(player_id) # Assuming you add this method to your Game class
+    if player_id in player_to_room_map:
+        del player_to_room_map[player_id] # Remove player from map
 
     # Check if the host left. If the host leaves, delete the room immediately.
     # OR, if the room is now empty, delete it.
-    if game.host_id == player_id or not game.players:
+    if game.host_id == player_id or game.get_num_players() == 0:
         del active_games[room_code]
         print(f"Room {room_code} deleted because host ({player_id}) left or room is empty.")
         return jsonify({'message': 'You left the room. Room deleted (host left or room empty).'}), 200
@@ -182,42 +217,26 @@ def delete_room():
 
     # Delete the room from active_games
     del active_games[room_code]
+    players_in_room = [p.player_id for p in game.players]
+    for p_id in players_in_room:
+        if p_id in player_to_room_map:
+            del player_to_room_map[p_id]
     print(f"Host ({player_id}) explicitly deleted room {room_code}.")
     return jsonify({'message': f'Room {room_code} has been successfully deleted.'}), 200
-
-
-@app.route('/start_game', methods=['POST'])
-def start_game():
-    data = request.get_json()
-    player_names = data.get('players', [])
-    if not player_names or len(player_names) < 4:
-        return jsonify({'error': 'Must have at least 4 players'}), 400
-    
-    players = [Player(name) for name in player_names]
-    game = AssholeGame(players)
-    game_state['game'] = game
-    game_loop['loop'] = GameLoop(game)
-    game_state['current_player'] = game.get_current_player().name if game.get_current_player() else None
-    game_state['pile'] = [card.to_string() for card in game.pile]
-    game_state['hands'] = {player.name: [card.to_string() for card in player.get_hand().cards] for player in players}
-    game_state['is_game_over'] = game.is_game_over()
-
-    return jsonify({'message': 'Game started', 'game_state': game_state}), 200
 
 @app.route('/start_game_round', methods=['POST'])
 def start_game_round():
     data = request.json
     room_code = data.get('room_code', '').upper()
     player_id = data.get('player_id')
-    player_id_from_frontend = data.get('player_id') 
 
     game = active_games.get(room_code)
 
     print("\n--- Backend Start Game Round Debug ---")
     print(f"Request for Room: {room_code}")
-    print(f"Player ID from Frontend (sent in POST body): {player_id_from_frontend}")
+    print(f"Player ID from Frontend (sent in POST body): {player_id}")
     print(f"Stored Game Host ID (from active_games[{room_code}]): {game.host_id if game else 'N/A'}")
-    print(f"Comparison: {game.host_id == player_id_from_frontend if game else 'N/A'}")
+    print(f"Comparison: {game.host_id == player_id if game else 'N/A'}")
     print("--- End Backend Start Game Round Debug ---\n")
 
     if not game:
@@ -236,10 +255,15 @@ def start_game_round():
         
         game.start_game()
 
+        game_state_payload = _get_game_state_for_player(game, player_id)
+        if not game_state_payload:
+            raise Exception("Failed to get game state after starting game.")
+
         return jsonify({
             'message': 'Game round started!',
-            'game_id': room_code,
+            'room_code': room_code,
             'current_player': game.get_current_player().name if game.get_current_player() else None,
+            'game_state': game_state_payload,
             'player_hands_dealt': True
         }), 200
     
@@ -248,54 +272,60 @@ def start_game_round():
     except Exception as e:
         return jsonify({'error': f'An unexpected error occurred while starting the game: {str(e)}'}), 500
 
-@app.route('/play_card', methods=['POST'])
-def play_card():
-    if 'game' not in game_state:
-        return jsonify({'error': 'No game in progress'}), 400
-    
+@app.route('/play_cards', methods=['POST'])
+def play_cards():
     data = request.get_json()
-    player_name = data.get('player')
-    cards_to_play_str = data.get('cards', [])
-    game = game_state['game']
-    player = next((p for p in game.players if p.name == player_name), None)
+    room_code = data.get('room_code', '').upper()
+    player_id = data.get('player_id')
+    cards_to_play_data = data.get('cards', [])
+    game = active_games.get(room_code)
 
-    if not player:
-        return jsonify({'error': f'Player {player_name} not found'}), 404
+    if not game:
+        return jsonify({'error': 'Game room not found.'}), 404
     
-    cards_to_play = [game.card.string_to_card(card_str) for card_str in cards_to_play_str]
+    if game.status != "IN_PROGRESS":
+        return jsonify({'error': 'Game is not in progress.'}), 400
 
     try:
-        is_valid = game.play_turn(player, cards_to_play)
-        if is_valid:
-            game.handle_player_out()
-            game_state['current_player'] = game.get_current_player().name if game.get_current_player() else None
-            game_state['pile'] = [card.to_string() for card in game.pile]
-            game_state['hands'] = {p.name: [card.to_string() for card in p.get_hand().cards] for p in game.players}
-            game_state['is_game_over'] = game.is_game_over()
-            return jsonify({'message': 'Card(s) played', 'game_state': game_state}), 200
-        else:
-            return jsonify({'error': 'Invalid play'}), 400
+        game.play_cards(player_id, cards_to_play_data)
+
+        game_state_payload = _get_game_state_for_player(game, player_id)
+        if not game_state_payload:
+            raise Exception("Failed to get game state after playing cards.")
+
+        return jsonify({'message': 'Card(s) played', 'game_state': game_state_payload}), 200
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        print(f"Error playing cards: {e}")
+        return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
     
 @app.route('/pass_turn', methods=['POST'])
 def pass_turn():
-    if 'game' not in game_state:
-        return jsonify({'error': 'No game in progress'}), 400
-    
     data = request.get_json()
-    player_name = data.get('player')
-    game = game_state['game']
-    player = next((p for p in game.players if p.name == player_name), None)
+    room_code = data.get('room_code', '').upper()
+    player_id = data.get('player_id')
 
-    if not player:
-        return jsonify({'error': f'Player {player_name} not found'}), 404
-    
-    game.pass_turn(player)
-    game_state['current_player'] = game.get_current_player().name if game.get_current_player() else None
-    game_state['pile'] = [card.to_string() for card in game.pile]
-    game_state['is_game_over'] = game.is_game_over()
-    return jsonify({'message': 'Turn passed', 'game_state': game_state}), 200
+    game = active_games.get(room_code)
+
+    if not game:
+        return jsonify({'error': 'Game room not found.'}), 404
+
+    if game.status != "IN_PROGRESS":
+        return jsonify({'error': 'Game is not in progress.'}), 400
+
+    try:
+        game.pass_turn(player_id)    
+
+        game_state_payload = _get_game_state_for_player(game, player_id)
+        if not game_state_payload:
+            raise Exception("Failed to get game state after passing turn.")
+        return jsonify({'message': 'Turn passed', 'game_state': game_state}), 200
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        print(f"Error passing turn: {e}")
+        return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
 
 # Helper to get the current game state for a specific player
 def _get_game_state_for_player(game, player_id):
@@ -308,11 +338,12 @@ def _get_game_state_for_player(game, player_id):
         for p in game.players
     ]
 
-    player_hand_cards_str = [card.to_string() for card in player.get_hand().cards]
+    player_hand_cards_data = [card.to_dict() for card in player.get_hand().cards]
 
-    pile_cards_str = [card.to_string() for card in game.pile]
+    pile_cards_data = [card.to_dict() for card in game.pile]
 
     current_player_name = game.get_current_player().name if game.get_current_player() else None
+    current_turn_player_id = game.get_current_player().player_id if game.get_current_player() else None
 
     final_rankings = sorted(game.players, key=lambda p: p.rank if p.rank is not None else float('inf'))
     rankings_data = {
@@ -320,19 +351,25 @@ def _get_game_state_for_player(game, player_id):
         for p in final_rankings if p.rank is not None
     }
 
+    last_played_cards_data = [card.to_dict() for card in game.last_played_cards] if hasattr(game, 'last_played_cards') else []
+
     return {
         'room_code': game.room_code,
+        'game_type': game.game_type, #Added
         'host_id': game.host_id,
         'current_player': current_player_name,
-        'pile': pile_cards_str,
-        'your_hand': player_hand_cards_str,
+        'current_turn_player_id': current_turn_player_id,
+        'pile': pile_cards_data,
+        'your_hand': player_hand_cards_data,
         'all_players_data': all_players_data,
         'num_active_players': game.get_num_active_players(),
-        'is_game_over': game.is_game_over(),
+        'is_game_over': game.is_game_over,
         'rankings': rankings_data,
         'game_started': game.is_game_started,
         'MIN_PLAYERS': game.MIN_PLAYERS,
         'MAX_PLAYERS': game.MAX_PLAYERS,
+        'last_played_cards': last_played_cards_data,
+        'game_status': game.status
     }
 
 @app.route('/game_state', methods=['GET'])

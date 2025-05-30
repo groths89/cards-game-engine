@@ -1,3 +1,4 @@
+import uuid
 class Suit:
     CLUBS = "C"
     DIAMONDS = "D"
@@ -13,14 +14,22 @@ class Rank:
     SEVEN = "7"
     EIGHT = "8"
     NINE = "9"
-    TEN = "T"
+    TEN = "10"
     JACK = "J"
     QUEEN = "Q"
     KING = "K"
     ACE = "A"
 
+    @classmethod
+    def all_ranks(cls):
+        return [
+            cls.TWO, cls.THREE, cls.FOUR, cls.FIVE, cls.SIX, cls.SEVEN,
+            cls.EIGHT, cls.NINE, cls.TEN, cls.JACK, cls.QUEEN, cls.KING, cls.ACE  
+        ]
+
 class Card:
     def __init__(self, suit, rank):
+        self.id = str(uuid.uuid4())
         self.suit = suit
         self.rank = rank
 
@@ -28,39 +37,52 @@ class Card:
         return f"{self.rank}{self.suit}"
     
     def __str__(self):
-        # How we want the card to be displayed
-        rank_map = {11: 'J', 12: 'Q', 13: 'K', 14: 'A'}
-        rank_str = str(self.rank) if 2 <= self.rank <= 10 else rank_map.get(self.rank)
-        return f"{self.suit[0]}{rank_str}" # Using the first letter of the suit for brevity
+        return self.to_string()
     
     def __repr__(self):
         return f"Card('{self.suit}', {self.rank})"
     
     def get_value(self):
-        # Assign numerical values for comparing ranks in "Asshole"
         rank_values = {
-            2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, 10: 10,
-            11: 11, 12: 12, 13: 13, 14: 14
+            Rank.TWO: 2, Rank.THREE: 3, Rank.FOUR: 4, Rank.FIVE: 5,
+            Rank.SIX: 6, Rank.SEVEN: 7, Rank.EIGHT: 8, Rank.NINE: 9,
+            Rank.TEN: 10, Rank.JACK: 11, Rank.QUEEN: 12, Rank.KING: 13,
+            Rank.ACE: 14
         }
         return rank_values.get(self.rank)
-    
-    def string_to_card(self, card_str):
+    @staticmethod
+    def string_to_card(card_str):
         if len(card_str) < 2:
             return None
-        
-        suit_char = card_str[0].upper()
-        rank_str = card_str[1:]
 
-        suit_map = {'H': 'Hearts', 'D': 'Diamonds', 'C': 'Clubs', 'S': 'Spades'}
-        rank_map = {'2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, 'T': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14}
-
-        suit = suit_map.get(suit_char);
-        rank = rank_map.get(rank_str)
-
-        if suit and rank:
-            return Card(suit, rank)
+        # Correctly parse based on your Rank/Suit string formats
+        # Handle '10' rank specifically as it's 2 chars
+        if card_str.startswith('10'):
+            rank_char = '10' # Or '10', depending on how you represent TEN internally
+            suit_char = card_str[2].upper()
         else:
-            return None
+            rank_char = card_str[0].upper()
+            suit_char = card_str[1].upper()
+
+        # Map back to your Suit and Rank classes' values if needed, or directly to your stored values
+        # This assumes your Card constructor expects 'C', 'D', 'H', 'S' for suit and '2', 'T', 'J' etc for rank
+        if suit_char in [s.value for s in [Suit.CLUBS, Suit.DIAMONDS, Suit.HEARTS, Suit.SPADES]]:
+             suit = suit_char
+        else:
+            return None # Invalid suit
+
+        if rank_char in [r.value for r in [
+            Rank.TWO, Rank.THREE, Rank.FOUR, Rank.FIVE, Rank.SIX, Rank.SEVEN,
+            Rank.EIGHT, Rank.NINE, Rank.TEN, Rank.JACK, Rank.QUEEN, Rank.KING, Rank.ACE
+        ]]:
+            rank = rank_char
+        else:
+            return None # Invalid rank
+
+        return Card(suit, rank)
+        
+    def to_dict(self):
+        return {'id': self.id, 'rank': self.rank, 'suit': self.suit}
 
     def __eq__(self, other):
         if not isinstance(other, Card):

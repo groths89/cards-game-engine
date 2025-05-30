@@ -1,14 +1,17 @@
 import random
 
-from .card import Card
+from .card import Card, Suit, Rank
 
 class Deck:
     def __init__(self):
         self.cards = self._create_deck()
 
     def _create_deck(self):
-        suits = ["Hearts", "Diamonds", "Clubs", "Spades"]
-        ranks = list(range(2, 15)) # 2 to 14(Ace)
+        suits = [Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS, Suit.SPADES]
+        ranks = [
+            Rank.TWO, Rank.THREE, Rank.FOUR, Rank.FIVE, Rank.SIX, Rank.SEVEN,
+            Rank.EIGHT, Rank.NINE, Rank.TEN, Rank.JACK, Rank.QUEEN, Rank.KING, Rank.ACE
+        ]
         return [Card(suit, rank) for suit in suits for rank in ranks]
     
     def shuffle(self):
