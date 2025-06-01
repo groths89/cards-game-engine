@@ -2,6 +2,7 @@ import sys
 import os
 import uuid
 import random
+import traceback
 
 # Get the absolute path to the project root directory (one level up from 'api')
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -23,6 +24,7 @@ CORS(app, supports_credentials=True)
 
 # Dictionary to store the current game state (for a single game for now)
 active_games = {}
+print(f"DEBUG_GLOBAL_ACTIVE_GAMES_ID_AT_START: {id(active_games)}") # Unique ID of the dictionary object
 player_id_map = {}
 player_to_room_map = {}
 
@@ -62,6 +64,8 @@ def create_room():
         new_game.add_player(host_player_obj)
         new_game.status = "WAITING_FOR_PLAYERS"
         active_games[room_code] = new_game
+        print(f"DEBUG_CREATE_ROOM_ACTIVE_GAMES_ID: {id(active_games)}") # Unique ID of the dictionary object
+        print(f"DEBUG_CREATE_ROOM_AFTER_ADD_KEYS: {list(active_games.keys())}") # Confirms content after addition
         player_to_room_map[player_id] = room_code
         game_state_payload = _get_game_state_for_player(new_game, host_id)
         if not game_state_payload:
@@ -76,6 +80,7 @@ def create_room():
         }), 201
     except Exception as e:
         print(f"Error creating room: {e}")
+        traceback.print_exc()
         return jsonify({'error': f'Failed to create room: {str(e)}'}), 500
 
 @app.route('/join_room', methods=['POST'])
@@ -101,7 +106,7 @@ def join_room():
     if not game:
         return jsonify({'error': f'Room "{room_code}" does not exist.'}), 404
 
-    if game.status != "WAITING":
+    if game.status not in ["WAITING_FOR_PLAYERS", "WAITING", "LOBBY"]:
         return jsonify({'error': 'Game has already started or is not joinable.'}), 403
 
     if len(game.players) >= game.MAX_PLAYERS:
@@ -329,10 +334,9 @@ def pass_turn():
 
 # Helper to get the current game state for a specific player
 def _get_game_state_for_player(game, player_id):
-    player = next((p for p in game.players if p.player_id == player_id), None)
+    player = next((p for p in game.players if str(p.player_id) == player_id), None)
     if not player:
         return None
-    
     all_players_data = [
         {'name': p.name, 'id': p.player_id, 'is_active': p.is_active, 'hand_size': len(p.get_hand().cards), 'rank': p.rank}
         for p in game.players
@@ -381,13 +385,13 @@ def get_current_game_state():
     game = active_games.get(room_code)
 
     if not game:
+        traceback.print_exc()
         return jsonify({'error': 'Game room not found.'}), 404
 
     game_state_data = _get_game_state_for_player(game, player_id)
 
     if not game_state_data:
         return jsonify({'error': 'Player not found in this game or invalid game state.'}), 404
-    
     return jsonify(game_state_data), 200
 
 if __name__ == '__main__':
