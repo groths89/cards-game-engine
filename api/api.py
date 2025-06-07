@@ -20,7 +20,15 @@ from game_engine.games.asshole import AssholeGame
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'my_dev_key')
-CORS(app, supports_credentials=True)
+
+frontend_origins = [
+    "http://localhost:3000",
+    os.environ.get('AMPLIFY_FRONTEND_URL'),
+    "https://play.gregsgames.social/"
+]
+frontend_origins = [origin for origin in frontend_origins if origin is not None]
+
+CORS(app, resources={r"/*": {"origins": frontend_origins}})
 
 # Dictionary to store the current game state (for a single game for now)
 active_games = {}
@@ -34,6 +42,10 @@ def generate_unique_room_code(length=4):
         code = ''.join(random.choice(characters) for _ in range(length))
         if code not in active_games:
             return code
+
+@app.route("/")
+def home():
+    return jsonify({"message": "Hello from Greg's Games Social Backend!"})
 
 @app.route('/create_room', methods=['POST'])
 def create_room():
@@ -395,4 +407,4 @@ def get_current_game_state():
     return jsonify(game_state_data), 200
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True, host='0.0.0.0', port=os.environ.get('PORT', 8080))
