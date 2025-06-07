@@ -23,8 +23,11 @@ app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'my_dev_key')
 
 frontend_origins = [
     "http://localhost:3000",
+    "https://main.dt7s5ohdz6dup.amplifyapp.com",
     os.environ.get('AMPLIFY_FRONTEND_URL'),
-    "https://play.gregsgames.social/"
+    "https://play.gregsgames.social/",
+    "https://zi6mmwhedx.us-east-1.awsapprunner.com/",
+    "https://api.gregsgames.social/"
 ]
 frontend_origins = [origin for origin in frontend_origins if origin is not None]
 
