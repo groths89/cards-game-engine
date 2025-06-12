@@ -1,4 +1,4 @@
-from game_engine.card import Card, Rank
+from game_engine.card import Card, Rank, Suit
 from game_engine.game_loop import GameLoop
 from game_engine.game_state import GameState
 from game_engine.player import Player
@@ -108,12 +108,16 @@ class AssholeGame(GameState):
 
     # Create a method that determines the starting player
     def determine_starting_player(self):
-        self.starting_card_suit = "Spades"
-        self.starting_card_rank = 14
+        target_suit = Suit.SPADES
+        target_rank = Rank.ACE
 
         for index, player in enumerate(self.players):
-            for card in player.get_hand().cards:
-                if card.suit == self.starting_card_suit and card.rank == self.starting_card_rank:
+            hand_cards = player.get_hand().cards
+            if not hand_cards:
+                continue
+
+            for card in hand_cards:
+                if card.suit == target_suit and card.rank == target_rank:
                     return index # Correctly returning the player's index
         return 0 # Default if Ace of Spades isn't found (shouldn't happen)
 
