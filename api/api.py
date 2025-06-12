@@ -176,7 +176,10 @@ def get_room():
             "status": game.status,
             "game_started": game.is_game_started
         })
-    return jsonify(lobbies_data), 200
+    return jsonify({
+        "success": True,
+        "rooms": lobbies_data
+    }), 200
 
 # /leave_room endpoint
 @app.route('/leave_room', methods=['POST'])
