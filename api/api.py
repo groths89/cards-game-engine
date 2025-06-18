@@ -1,4 +1,5 @@
 import eventlet
+
 eventlet.monkey_patch()
 
 import sys
@@ -22,6 +23,7 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 from game_engine.player import Player
 from game_engine.game_loop import GameLoop
 from game_engine.games.asshole import AssholeGame
+from game_engine.card import Card
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'my_dev_key')
@@ -74,9 +76,17 @@ def _get_game_state_for_player(game, player_id):
 
     last_played_cards_data = [card.to_dict() for card in game.last_played_cards] if hasattr(game, 'last_played_cards') else []
 
+    interrupt_bids_data = []
+    if game.interrupt_bids:
+        for bid_player_id, bid_cards in game.interrupt_bids:
+            interrupt_bids_data.append({
+                'player_id': bid_player_id,
+                'cards': [c.to_dict() for c in bid_cards]
+            })
+
     return {
         'room_code': game.room_code,
-        'game_type': game.game_type, #Added
+        'game_type': game.game_type,
         'host_id': game.host_id,
         'current_player_name': current_player_name,
         'current_turn_player_id': current_turn_player_id,
@@ -90,7 +100,15 @@ def _get_game_state_for_player(game, player_id):
         'MIN_PLAYERS': game.MIN_PLAYERS,
         'MAX_PLAYERS': game.MAX_PLAYERS,
         'last_played_cards': last_played_cards_data,
-        'game_status': game.status
+        'game_status': game.status,
+        'game_message': game.game_message,
+        'current_play_rank': game.current_play_rank,
+        'current_play_count': game.current_play_count,
+        'interrupt_active': game.interrupt_active,
+        'interrupt_type': game.interrupt_type,
+        'interrupt_initiator_player_id': game.interrupt_initiator_player_id,
+        'interrupt_rank': game.interrupt_rank,
+        'interrupt_bids': interrupt_bids_data
     }
 
 def _get_all_rooms_state():
@@ -175,7 +193,7 @@ def create_room():
             'room_code': room_code,
             'player_id': player_id,
             'player_name': player_name,
-            'game_state': game_state_payload # Return initial game state
+            'game_state': game_state_payload
         }), 201
     except Exception as e:
         print(f"Error creating room: {e}")
@@ -205,7 +223,7 @@ def join_room_http():
     if not game:
         return jsonify({'error': f'Room "{room_code}" does not exist.'}), 404
 
-    if game.status not in ["WAITING_FOR_PLAYERS", "WAITING", "LOBBY"]:
+    if game.status == "IN_PROGRESS" or game.status == "GAME_OVER":
         return jsonify({'error': 'Game has already started or is not joinable.'}), 403
 
     if len(game.players) >= game.MAX_PLAYERS:
@@ -218,7 +236,7 @@ def join_room_http():
             print(f"Player {player_id} rejoining with updated name to {player_name} in room {room_code}.")
         else:
             print(f"Player {player_name} ({player_id}) rejoining room {room_code}.")
-        
+
         player_to_room_map[player_id] = room_code
 
         _send_game_state_update_to_room_players(game)
@@ -376,11 +394,20 @@ def play_cards():
     game = active_games.get(room_code)
 
     if not game:
-        return jsonify({'error': 'Game room not found.'}), 404
+        return jsonify({'success': False, 'error': 'Game room not found.'}), 404
     
     if game.status != "IN_PROGRESS":
-        return jsonify({'error': 'Game is not in progress.'}), 400
+        return jsonify({'success': False, 'error': 'Game is not in progress.'}), 400
 
+    if game.interrupt_active and game.get_current_player().player_id == player_id:
+        print(f"DEBUG: Implicitly resolving interrupt of type {game.interrupt_type} initiated by {game.interrupt_initiator_player_id}.")
+        try:
+            game.resolve_interrupt()
+            print(f"DEBUG: Interrupt resolved before normal play.")
+        except Exception as e:
+            print(f"ERROR: Failed to resolve interrupt implicitly: {e}")
+            traceback.print_exc()
+            return jsonify({'success': False, 'error': f"Failed to resolve interrupt: {str(e)}"}), 500
     try:
         game.play_cards(player_id, cards_to_play_data)
 
@@ -406,10 +433,20 @@ def pass_turn():
     game = active_games.get(room_code)
 
     if not game:
-        return jsonify({'error': 'Game room not found.'}), 404
+        return jsonify({'success': False, 'error': 'Game room not found.'}), 404
 
     if game.status != "IN_PROGRESS":
-        return jsonify({'error': 'Game is not in progress.'}), 400
+        return jsonify({'success': False, 'error': 'Game is not in progress.'}), 400
+
+    if game.interrupt_active and game.get_current_player().player_id == player_id:
+        print(f"DEBUG: Implicitly resolving interrupt of type {game.interrupt_type} initiated by {game.interrupt_initiator_player_id}.")
+        try:
+            game.resolve_interrupt()
+            print(f"DEBUG: Interrupt resolved before normal pass.")
+        except Exception as e:
+            print(f"ERROR: Failed to resolve interrupt implicitly during pass: {e}")
+            traceback.print_exc()
+            return jsonify({'success': False, 'error': f"Failed to resolve interrupt: {str(e)}"}), 500
 
     try:
         game.pass_turn(player_id)    
@@ -582,6 +619,38 @@ def on_leave_game_room_socket(data):
            print(f"DEBUG: Player {player_id} left room {room_code}, but game no longer exists (might have been deleted by host/last player).") 
     else:
         emit('status', {'msg': f'Warning: Room {room_code} not found or invalid on leave.'}, room=request.sid)
+
+@socketio.on('submit_interrupt_bid')
+def on_submit_interrupt_bid(data):
+    """
+    Handles a player's attempt to submit an interrupt bid (e.g., playing 3s out of turn, or a higher bomb).
+    """
+    room_code = data.get('room_code')
+    player_id = data.get('player_id')
+    cards_data = data.get('cards', [])
+
+    print(f"DEBUG: Received 'submit_interrupt_bid' from Player ID: {player_id} in Room: {room_code} with cards: {cards_data}")
+
+    game = active_games.get(room_code)
+    if not game:
+        emit('status', {'msg': 'Error: Game room not found for interrupt bid.'}, room=request.sid)
+        return
+
+    # Convert incoming card data (dict) to Card objects
+    cards_to_play_objects = [Card(c['suit'], c['rank']) for c in cards_data]
+
+    try:
+        game.add_interrupt_bid(player_id, cards_to_play_objects)
+        print(f"DEBUG: Player {player_id} successfully submitted interrupt bid.")
+        _send_game_state_update_to_room_players(game)
+        emit('status', {'msg': 'Interrupt bid submitted.'}, room=request.sid)
+    except ValueError as e:
+        print(f"ERROR: ValueError on interrupt bid: {e}")
+        emit('status', {'msg': f'Error submitting interrupt bid: {str(e)}'}, room=request.sid)
+    except Exception as e:
+        print(f"ERROR: An unexpected error occurred on interrupt bid: {e}")
+        traceback.print_exc()
+        emit('status', {'msg': f'An unexpected error occurred during interrupt bid: {str(e)}'}, room=request.sid)    
 
 if __name__ == '__main__':
     print("Starting Flask-SocketIO server...")

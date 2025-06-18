@@ -22,8 +22,6 @@ class Hand:
         self.cards.sort(key=lambda card: card.get_value())
 
     def play_cards(self, cards_to_play):
-        # For now, let's just remove the cards from the hand.
-        # We'll add validation logic in the game state.
         played_cards = []
         indices_to_remove = sorted([self.cards.index(card) for card in cards_to_play], reverse=True)
         for index in indices_to_remove:
