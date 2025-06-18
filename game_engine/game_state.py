@@ -37,6 +37,51 @@ class GameState:
             return self.players[self.current_player_index]
         return None
     
+    def add_player(self, player: Player):
+        if not isinstance(player, Player):
+            raise ValueError("Invalid object provided. Must be a Player instance.")
+        
+        if any(p.player_id == player.player_id for p in self.players):
+            raise ValueError(f"Player with ID {player.player_id} already exists in room {self.room_code}.")
+        
+        if len(self.players) >= self.MAX_PLAYERS:
+            raise ValueError(f"Room {self.room_code} is full. Max players: {self.MAX_PLAYERS}.")
+
+        self.players.append(player)
+        print(f"DEBUG: Player '{player.name}' ({player.player_id}) added to game {self.room_code}.")
+        self.game_message = f"{player.name} joined the room."
+        
+        if len(self.players) >= self.MIN_PLAYERS and not self.is_game_started:
+            self.status = "READY_TO_START"
+            self.game_message = "Enough players to start! Host can now start the game."
+
+    def remove_player(self, player_id: str):
+        initial_player_count = len(self.players)
+        self.players = [p for p in self.players if p.player_id != player_id]
+        
+        if len(self.players) < initial_player_count:
+            print(f"DEBUG: Player {player_id} removed from game {self.room_code}.")
+            self.game_message = f"Player {player_id[:4]}... left the room."
+            
+            if self.host_id == player_id:
+                if self.players:
+                    self.host_id = self.players[0].player_id
+                    self.game_message += f" {self.players[0].name} is now the host."
+                    print(f"DEBUG: Host {player_id} left. New host is {self.players[0].name}.")
+                else:
+                    print(f"DEBUG: Last player (host) left, game {self.room_code} is now empty.")
+            
+            if self.is_game_started and len(self.players) < self.MIN_PLAYERS:
+                self.is_game_started = False
+                self.status = "WAITING_FOR_PLAYERS"
+                self.game_message += " Game stopped due to insufficient players."
+
+            elif not self.is_game_started and len(self.players) < self.MIN_PLAYERS:
+                self.status = "WAITING_FOR_PLAYERS"
+                self.game_message += " Waiting for more players."
+        else:
+            print(f"WARNING: Attempted to remove player {player_id} from room {self.room_code}, but player not found.")
+
     def get_current_player_id(self):
         player = self.get_current_player()
         return player.player_id if player else None
