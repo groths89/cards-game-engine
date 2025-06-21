@@ -4,6 +4,7 @@ class Suit:
     DIAMONDS = "D"
     HEARTS = "H"
     SPADES = "S"
+    ALL_SUITS = [CLUBS, DIAMONDS, HEARTS, SPADES]
 
 class Rank:
     TWO = "2"
@@ -32,6 +33,16 @@ class Card:
         self.id = str(uuid.uuid4())
         self.suit = suit
         self.rank = rank
+
+    _rank_display_names = {
+        Rank.TWO: "2", Rank.THREE: "3", Rank.FOUR: "4", Rank.FIVE: "5",
+        Rank.SIX: "6", Rank.SEVEN: "7", Rank.EIGHT: "8", Rank.NINE: "9",
+        Rank.TEN: "10", Rank.JACK: "Jack", Rank.QUEEN: "Queen",
+        Rank.KING: "King", Rank.ACE: "Ace"
+    }
+
+    def get_rank_display(self):
+        return self._rank_display_names.get(self.rank, self.rank)
 
     def to_string(self):
         return f"{self.rank}{self.suit}"
