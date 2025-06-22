@@ -29,10 +29,12 @@ class Rank:
         ]
 
 class Card:
-    def __init__(self, suit, rank):
-        self.id = str(uuid.uuid4())
-        self.suit = suit
-        self.rank = rank
+    _numeric_rank_map = {
+        Rank.TWO: 2, Rank.THREE: 3, Rank.FOUR: 4, Rank.FIVE: 5,
+        Rank.SIX: 6, Rank.SEVEN: 7, Rank.EIGHT: 8, Rank.NINE: 9,
+        Rank.TEN: 10, Rank.JACK: 11, Rank.QUEEN: 12, Rank.KING: 13,
+        Rank.ACE: 14
+    }
 
     _rank_display_names = {
         Rank.TWO: "2", Rank.THREE: "3", Rank.FOUR: "4", Rank.FIVE: "5",
@@ -41,8 +43,19 @@ class Card:
         Rank.KING: "King", Rank.ACE: "Ace"
     }
 
-    def get_rank_display(self):
-        return self._rank_display_names.get(self.rank, self.rank)
+    _suit_display_names = {
+        Suit.CLUBS: 'Clubs', Suit.DIAMONDS: 'Diamonds',
+        Suit.HEARTS: 'Hearts', Suit.SPADES: 'Spades'      
+    }
+
+    def __init__(self, suit: str, rank: str, id: str = None):
+        if suit not in Suit.ALL_SUITS:
+            raise ValueError(f"Invalid suit: {suit}. Must be one of {Suit.ALL_SUITS}")
+        if rank not in Rank.all_ranks():
+            raise ValueError(f"Invalid rank: {rank}. Must be one of {Rank.all_ranks()}")
+        self.id = id if id else str(uuid.uuid4())
+        self.suit = suit
+        self.rank = rank
 
     def to_string(self):
         return f"{self.rank}{self.suit}"
@@ -51,51 +64,54 @@ class Card:
         return self.to_string()
     
     def __repr__(self):
-        return f"Card('{self.suit}', {self.rank})"
+        return f"Card('{self.suit}', '{self.rank}', id='{self.id[:8]}...')"
     
     def get_value(self):
-        rank_values = {
-            Rank.TWO: 2, Rank.THREE: 3, Rank.FOUR: 4, Rank.FIVE: 5,
-            Rank.SIX: 6, Rank.SEVEN: 7, Rank.EIGHT: 8, Rank.NINE: 9,
-            Rank.TEN: 10, Rank.JACK: 11, Rank.QUEEN: 12, Rank.KING: 13,
-            Rank.ACE: 14
-        }
-        return rank_values.get(self.rank)
+        return self._numeric_rank_map.get(self.rank)
+    
+    def get_rank_display(self):
+        return self._rank_display_names.get(self.rank, self.rank)
+
+    def get_suit_display(self):
+        return self._suit_display_names.get(self.suit, self.suit)
+
+    def to_dict(self):
+        return {'id': self.id, 'rank': self.rank, 'suit': self.suit, 'numeric_rank': self.get_value(), 'name': self.get_rank_display(),  'full_name': f"{self.get_rank_display()} of {self.get_suit_display()}"}
+
     @staticmethod
     def string_to_card(card_str):
         if len(card_str) < 2:
             return None
 
-        # Correctly parse based on your Rank/Suit string formats
-        # Handle '10' rank specifically as it's 2 chars
         if card_str.startswith('10'):
-            rank_char = '10' # Or '10', depending on how you represent TEN internally
+            rank_char = '10'
             suit_char = card_str[2].upper()
         else:
             rank_char = card_str[0].upper()
             suit_char = card_str[1].upper()
 
-        # Map back to your Suit and Rank classes' values if needed, or directly to your stored values
-        # This assumes your Card constructor expects 'C', 'D', 'H', 'S' for suit and '2', 'T', 'J' etc for rank
-        if suit_char in [s.value for s in [Suit.CLUBS, Suit.DIAMONDS, Suit.HEARTS, Suit.SPADES]]:
-             suit = suit_char
-        else:
-            return None # Invalid suit
+        if suit_char not in Suit.ALL_SUITS:
+            return None
 
-        if rank_char in [r.value for r in [
-            Rank.TWO, Rank.THREE, Rank.FOUR, Rank.FIVE, Rank.SIX, Rank.SEVEN,
-            Rank.EIGHT, Rank.NINE, Rank.TEN, Rank.JACK, Rank.QUEEN, Rank.KING, Rank.ACE
-        ]]:
-            rank = rank_char
-        else:
-            return None # Invalid rank
+        if rank_char not in Rank.all_ranks():
+            return None
 
-        return Card(suit, rank)
-        
-    def to_dict(self):
-        return {'id': self.id, 'rank': self.rank, 'suit': self.suit}
+        return Card(suit_char, rank_char)
 
     def __eq__(self, other):
         if not isinstance(other, Card):
             return NotImplemented
         return self.suit == other.suit and self.rank == other.rank
+    
+    def __hash__(self):
+        return hash((self.id, self.suit, self.rank))
+    
+    def __lt__(self, other):
+        if not isinstance(other, Card):
+            return NotImplemented
+        return self.get_value() < other.get_value()
+    
+    def __le__(self, other):
+        if not isinstance(other, Card):
+            return NotImplemented
+        return self.get_value() <= other.get_value()
