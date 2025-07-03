@@ -44,15 +44,7 @@ class AssholeGame(GameState):
         Initializes and starts a new round of Asshole.
         Call this when enough players have joined the room.
         """
-        if len(self.players) < self.MIN_PLAYERS:
-            raise ValueError(f"Need at least {self.MIN_PLAYERS} players to start. Current: {len(self.players)}.")
-        if len(self.players) > self.MAX_PLAYERS:
-            raise ValueError(f"Cannot exceed {self.MAX_PLAYERS} players. Current: {len(self.players)}.")
-        if self.is_game_started:
-            raise ValueError("Game has already started.")
-
-
-        print(f"Starting game in room {self.room_code} with players: {[p.name for p in self.players]}")
+        super().start_game()
 
         self.deck = Deck()
         self.deck.shuffle()
@@ -66,10 +58,10 @@ class AssholeGame(GameState):
         self.same_rank_streak = 0
         self.should_skip_next_player = False
         self.pile_cleared_this_turn = False
-        self.player_went_out = 0 # Reset player went out counter for new game/round
+        self.player_went_out = 0
         self.pile = []
         self.current_play_count = 0 
-        self.current_play_rank = None # Ensure this is reset too (string rank)
+        self.current_play_rank = None
         self.consecutive_passes = 0
         self.last_played_cards = []
         self.interrupt_active = False
@@ -77,22 +69,22 @@ class AssholeGame(GameState):
         self.interrupt_initiator_player_id = None
         self.interrupt_rank = None
         self.interrupt_bids = []
-        self.cards_of_rank_played = {rank_str: 0 for rank_str in Rank.all_ranks()} # Reset card counts
-        self.rankings = {} # Reset rankings for new game
+        self.cards_of_rank_played = {rank_str: 0 for rank_str in Rank.all_ranks()}
+        self.rankings = {}
 
         self.deal_all_cards()
         self.current_player_index = self.determine_starting_player()
         start_player = self.get_current_player()
 
         if start_player:
-            self.game_message = f"Game started! It's {start_player.name}'s turn (3 of Clubs)."
+            self.game_message = f"Game started! It's {start_player.name}'s turn (Ace of Spades)."
             self.round_leader_player_id = start_player.player_id
         else:
-            self.game_message = "Game started, but could not determine first player's turn (3 of Clubs not found or no active players)." 
+            self.game_message = "Game started, but could not determine first player's turn (Ace of Spades not found or no active players)." 
             if self.players:
                 self.current_player_index = random.randint(0, len(self.players) - 1)
                 start_player = self.players[self.current_player_index]
-                self.game_message = f"Game started! No 3 of Clubs, {start_player.name} starts randomly."
+                self.game_message = f"Game started! Ace of Spades, {start_player.name} starts randomly."
                 self.round_leader_player_id = start_player.player_id
             else:
                 self.game_message = "Game started, but no players found. Critical error state."
@@ -161,7 +153,7 @@ class AssholeGame(GameState):
         if not player.is_active:
             raise ValueError("This player is out of the game and cannot play.")
 
-        cards_to_play = [Card(c['suit'], c['rank']) for c in cards_to_play_data]
+        cards_to_play = [Card(c['suit'], c['rank'], id=c.get('id')) for c in cards_to_play_data]
         
         # --- Basic checks (player's turn, has cards) ---
         current_player = self.get_current_player()
@@ -177,11 +169,12 @@ class AssholeGame(GameState):
                 print(f"{player.name} does not have the card {card_to_play} in their hand.")
                 return
 
-        played_rank = cards_to_play[0].rank
+        played_rank_str = cards_to_play[0].rank
+        played_rank_value = cards_to_play[0].get_value()
         played_count = len(cards_to_play)
 
         # --- Rule 1: Handle 2s (Clearing Card) ---
-        if played_rank == 2:
+        if played_rank_str == Rank.TWO:
             player.play_cards(cards_to_play)
             self.pile.extend(cards_to_play)
             self.last_played_cards = cards_to_play
@@ -192,7 +185,7 @@ class AssholeGame(GameState):
             return
 
         # --- Rule 2: Handle 3 plays (Initiates Interrupt) ---
-        if played_rank == 3:
+        if played_rank_str == Rank.THREE:
             player.play_cards(cards_to_play)
             self.pile.extend(cards_to_play)
             self.last_played_cards = cards_to_play
@@ -203,8 +196,8 @@ class AssholeGame(GameState):
             self.record_interrupt_initiation(
                 'three_play',
                 player_id,
-                played_rank,
-                f"{player.name} played {played_count} Three(s)! Other players can now play their 3s to counter."
+                played_rank_str,
+                f"{player.name} played {played_count} {Card._rank_display_names[played_rank_str]}(s)! Other players can now play their 3s to counter."
             )
             return
 
@@ -215,45 +208,45 @@ class AssholeGame(GameState):
             self.current_player_index = self.players.index(player) # It starts with the current player
             return # End the turn after playing a 3 for now
         else:
-            self.next_player()
+            self.advance_turn(skip_count=0)
 
         # --- General Play Rules (for non-2s, non-3s, and when no interrupt is active) ---
         if not self.pile:
             player.play_cards(cards_to_play)
             self.pile.extend(cards_to_play)
-            self.current_play_rank = played_rank
+            self.current_play_rank = played_rank_value
             self.current_play_count = played_count
             self.consecutive_passes = 0
             self.same_rank_streak = 1
-            self.cards_of_rank_played[played_rank] = played_count
-            self.game_message = f"{player.name} started a new round with {played_count} x {self.get_rank_display(played_rank_value)}."
-            self.next_player()
+            self.cards_of_rank_played[played_rank_value] = played_count
+            self.game_message = f"{player.name} started a new round with {played_count} x {Card.get_rank_display(played_rank_str)}."
+            self.advance_turn(skip_count=0)
         else:
             if played_count != self.current_play_count:
                 raise ValueError(f"You must play {self.current_play_count} cards to match the pile.")
             
-            if played_rank > self.current_play_rank:
+            if played_rank_value > self.current_play_rank:
                 print(f"{player.name} has matched the rank. Skipping next player.")
                 player.play_cards(cards_to_play)
                 self.pile.extend(cards_to_play)
-                self.current_play_rank = played_rank
+                self.current_play_rank = played_rank_value
                 self.last_played_cards = cards_to_play
                 self.consecutive_passes = 0 # Reset passes on a successful play
                 self.same_rank_streak = 1
-                self.cards_of_rank_played[played_rank] += played_count
-                self.game_message = f"{player.name} played {played_count} x {self.get_rank_display(played_rank)}."
-            elif played_rank == self.current_play_rank:
+                self.cards_of_rank_played[played_rank_value] += played_count
+                self.game_message = f"{player.name} played {played_count} x {Card.get_rank_display(played_rank_str)}."
+            elif played_rank_value == self.current_play_rank:
                 # --- Rule 3: Same Rank Play (Skipping next player, potentially leads to 4-of-a-kind clear) ---
                 player.play_cards(cards_to_play)
                 self.pile.extend(cards_to_play)
                 self.last_played_cards = cards_to_play # Important for bomb rule
                 self.consecutive_passes = 0 # Reset passes on a successful play
                 self.same_rank_streak += 1 # Increment streak
-                self.cards_of_rank_played[played_rank] += played_count # Track total of this rank on pile        
+                self.cards_of_rank_played[played_rank_value] += played_count # Track total of this rank on pile        
                 
-                if self.cards_of_rank_played[played_rank] == 4:
+                if self.cards_of_rank_played[played_rank_value] == 4:
                     # --- Rule 4: 4-of-a-Kind (Immediate Pile Clear) ---
-                    self.game_message = f"{player.name} played all four {self.get_rank_display(played_rank)}s! Pile cleared."
+                    self.game_message = f"{player.name} played all four {Card.get_rank_display(played_rank_str)}s! Pile cleared."
                     print(self.game_message) # For backend logging
                     self.clear_pile()
                     self.current_player_index = self.players.index(player)
@@ -265,10 +258,8 @@ class AssholeGame(GameState):
                 self.game_message = f"{player.name} matched the rank! Next player will be skipped."
 
             else:
-                raise ValueError(f"Your play ({self.get_rank_display(played_rank)}) must be higher than or match the current top card ({self.get_rank_display(self.current_play_rank)}).")
+                raise ValueError(f"Your play ({Card.get_rank_display(played_rank_str)}) must be higher than or match the current top card ({Card.get_rank_display(played_rank_str)}).")
         
-        # If no interrupt was initiated (i.e., not a 3-play and not a 4-of-a-kind bomb), advance turn
-        # The `should_skip_next_player` will be consumed by advance_turn
         if not self.interrupt_active:
             self.advance_turn(skip_count=1 if self.should_skip_next_player else 0)
             self.should_skip_next_player = False
@@ -282,7 +273,6 @@ class AssholeGame(GameState):
         if not player.is_active:
             raise ValueError("This player is out of the game and cannot pass.")
 
-        # Asshole-specific pass logic
         if not self.pile:
             raise ValueError(f"{player.name} cannot pass to start the round. Must play a card or set of cards.")
         
@@ -295,16 +285,16 @@ class AssholeGame(GameState):
             last_player_to_play = self.players[(self.current_player_index - self.consecutive_passes + len(self.players)) % len(self.players)]
             print(f"Round over. {last_player_to_play.name} leads the next round.")
             self.clear_pile()
-            self.current_player_index = self.players.index(last_player_to_play) # Leader starts next round
-            self.consecutive_passes = 0 # Reset passes after round end
+            self.current_player_index = self.players.index(last_player_to_play)
+            self.consecutive_passes = 0
             self.threes_played_this_round = 0
             self.same_rank_streak = 0
             self.should_skip_next_player = False
             self.pile_cleared_this_turn = False
-            self.cards_of_rank_played = {rank.get_value(): 0 for rank in Rank.all_ranks()} # Reset for new round
-            self.next_player() # Advance turn to the leader
+            self.cards_of_rank_played = {rank.get_value(): 0 for rank in Rank.all_ranks()}
+            self.advance_turn(skip_count=0)
         else:
-            self.next_player() # Just advance turn if round not over
+            self.advance_turn(skip_count=0)
 
     def advance_turn(self, skip_count=0):
         """
@@ -323,7 +313,7 @@ class AssholeGame(GameState):
                     self.rankings[player.player_id] = {'name': player.name, 'rank': self.get_rank_name_display(player.rank, len(self.players))}
                     self.game_message = f"{player.name} went out! They are the {self.get_rank_name_display(player.rank, len(self.players))}."
 
-        if self.is_game_over():
+        if self.is_game_over:
             self.game_message = "Game Over!"
             self.status = "GAME_OVER"
             return
@@ -353,7 +343,7 @@ class AssholeGame(GameState):
         self.interrupt_type = interrupt_type
         self.interrupt_initiator_player_id = initiator_player_id
         self.interrupt_rank = interrupt_rank
-        self.interrupt_bids = [] # Clear any previous bids for a new interrupt window
+        self.interrupt_bids = []
         self.game_message = message
         print(f"Interrupt initiated: Type={interrupt_type}, Initiator={initiator_player_id}, Rank={interrupt_rank}")
 
@@ -377,7 +367,7 @@ class AssholeGame(GameState):
             raise ValueError("You must select cards for your interrupt bid.")
         
         if self.interrupt_type == 'three_play':
-            if not all(card.rank == 3 for card in cards_to_play):
+            if not all(card.rank == Rank.THREE for card in cards_to_play):
                 raise ValueError("Only 3s can be played as an interrupt bid for a three-play.")
             player_hand_threes = [c for c in player.get_hand().cards if c.rank == 3]
             for bid_card in cards_to_play:
@@ -402,11 +392,11 @@ class AssholeGame(GameState):
             
             bomb_rank = cards_to_play[0].rank
             if bomb_rank <= self.interrupt_rank:
-                raise ValueError(f"Your bomb ({self.get_rank_display(bomb_rank)}) must be higher than the interrupted rank ({self.get_rank_display(self.interrupt_rank)}).")
+                raise ValueError(f"Your bomb ({Card.get_rank_display(bomb_rank)}) must be higher than the interrupted rank ({Card.get_rank_display(bomb_rank)}).")
             
             player_hand_cards_of_rank = player.get_hand().get_cards_by_rank(bomb_rank)
             if len(player_hand_cards_of_rank) < 4:
-                raise ValueError(f"You do not have 4 cards of rank {self.get_rank_display(bomb_rank)} in your hand to play this bomb.")
+                raise ValueError(f"You do not have 4 cards of rank {Card.get_rank_display(bomb_rank)} in your hand to play this bomb.")
             
             if any(bid[0] == player_id for bid in self.interrupt_bids):
                 raise ValueError("You have already submitted a bid for this bomb opportunity.")
@@ -482,8 +472,9 @@ class AssholeGame(GameState):
         else:
             self.game_message = "Interrupt resolved without a clear winner or unrecognized type. Turn proceeds."
             self.clear_pile()
-            if initiator_player:
-                self.current_player_index = self.players.index(initiator_player)
+            initiator_player_obj = self.get_player_by_id(self.interrupt_initiator_player_id)
+            if initiator_player_obj and initiator_player_obj.is_active and not initiator_player_obj.is_out:
+                self.current_player_index = self.players.index(initiator_player_obj)
             self.game_message = "Interrupt resolved. New round starts."
 
         self.interrupt_active = False
@@ -571,7 +562,7 @@ class AssholeGame(GameState):
             return "Asshole"
         else:
             return f"Rank {rank}"
-        
+
     @property
     def is_game_started(self):
         return self.status == "IN_PROGRESS"
