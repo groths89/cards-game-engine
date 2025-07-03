@@ -22,6 +22,18 @@ class GameState:
                 if card: # Check if a card was actually dealt
                     player.hand.add_card(card)
 
+    def start_game(self):
+        if len(self.players) < self.MIN_PLAYERS:
+            raise ValueError(f"Need at least {self.MIN_PLAYERS} players to start. Current: {len(self.players)}.")
+        if len(self.players) > self.MAX_PLAYERS:
+            raise ValueError(f"Cannot exceed {self.MAX_PLAYERS} players. Current: {len(self.players)}.")
+        if self.is_game_started:
+            raise ValueError("Game has already started.")
+
+        print(f"Starting game in room {self.room_code} with players: {[p.name for p in self.players]}")
+
+        self.status = "IN_PROGRESS"
+
     # Create a method that determines the starting player
     def determine_starting_player(self):
         """

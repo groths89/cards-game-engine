@@ -69,14 +69,15 @@ class Card:
     def get_value(self):
         return self._numeric_rank_map.get(self.rank)
     
-    def get_rank_display(self):
-        return self._rank_display_names.get(self.rank, self.rank)
+    @staticmethod
+    def get_rank_display(rank_str: str):
+        return Card._rank_display_names.get(rank_str, rank_str)
 
     def get_suit_display(self):
         return self._suit_display_names.get(self.suit, self.suit)
 
     def to_dict(self):
-        return {'id': self.id, 'rank': self.rank, 'suit': self.suit, 'numeric_rank': self.get_value(), 'name': self.get_rank_display(),  'full_name': f"{self.get_rank_display()} of {self.get_suit_display()}"}
+        return {'id': self.id, 'rank': self.rank, 'suit': self.suit, 'numeric_rank': self.get_value(), 'name': self.get_rank_display(self.rank),  'full_name': f"{self.get_rank_display(self.rank)} of {self.get_suit_display()}"}
 
     @staticmethod
     def string_to_card(card_str):
