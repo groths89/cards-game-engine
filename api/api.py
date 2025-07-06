@@ -7,6 +7,7 @@ import os
 import uuid
 import random
 import traceback
+import time
 
 # Get the absolute path to the project root directory (one level up from 'api')
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -108,8 +109,20 @@ def _get_game_state_for_player(game, player_id):
         'interrupt_type': game.interrupt_type,
         'interrupt_initiator_player_id': game.interrupt_initiator_player_id,
         'interrupt_rank': game.interrupt_rank,
-        'interrupt_bids': interrupt_bids_data
+        'interrupt_bids': interrupt_bids_data,
+        'interrupt_active_until': game.interrupt_active_until,
+        'players_responded_to_interrupt': list(game.players_responded_to_interrupt),
     }
+
+def _check_and_resolve_interrupts(game):
+    """Checks if an active interrupt has expired and resolves it."""
+    if game.interrupt_active and game.interrupt_active_until and time.time() > game.interrupt_active_until:
+        print(f"DEBUG: Interrupt for room {game.room_code} expired. Resolving now.")
+        try:
+            game.resolve_interrupt()
+        except Exception as e:
+            print(f"ERROR: Failed to resolve expired interrupt for room {game.room_code}: {e}")
+            traceback.print_exc()
 
 def _get_all_rooms_state():
     """Helper to get state of all active rooms for lobby updates"""
@@ -128,6 +141,7 @@ def _get_all_rooms_state():
 
 def _send_game_state_update_to_room_players(game):
     """Sends each player in the game their individual game state update."""
+    _check_and_resolve_interrupts(game)
     print(f"DEBUG: Preparing game_state_update for room {game.room_code} (players: {len(game.players)})")
     for p in game.players:
         if player_id_map.get(p.player_id):
@@ -399,6 +413,8 @@ def play_cards():
     if game.status != "IN_PROGRESS":
         return jsonify({'success': False, 'error': 'Game is not in progress.'}), 400
 
+    _check_and_resolve_interrupts(game)
+
     if game.interrupt_active and game.get_current_player().player_id == player_id:
         print(f"DEBUG: Implicitly resolving interrupt of type {game.interrupt_type} initiated by {game.interrupt_initiator_player_id}.")
         try:
@@ -422,6 +438,7 @@ def play_cards():
         return jsonify({'error': str(e)}), 400
     except Exception as e:
         print(f"Error playing cards: {e}")
+        traceback.print_exc()
         return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
     
 @app.route('/pass_turn', methods=['POST'])
@@ -437,6 +454,8 @@ def pass_turn():
 
     if game.status != "IN_PROGRESS":
         return jsonify({'success': False, 'error': 'Game is not in progress.'}), 400
+
+    _check_and_resolve_interrupts(game)
 
     if game.interrupt_active and game.get_current_player().player_id == player_id:
         print(f"DEBUG: Implicitly resolving interrupt of type {game.interrupt_type} initiated by {game.interrupt_initiator_player_id}.")
@@ -462,6 +481,30 @@ def pass_turn():
     except Exception as e:
         print(f"Error passing turn: {e}")
         return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
+
+@app.route('/submit_interrupt_bid', methods=['POST'])
+def submit_interrupt_bid_route():
+    data = request.get_json()
+    room_code = data.get('room_code', '').upper()
+    player_id = data.get('player_id')
+    cards_data = data.get('cards')
+
+    game = active_games.get(room_code)
+
+    if not game:
+        return jsonify({'success': False, 'error': 'Game room not found.'}), 404
+
+    try:
+        game.submit_interrupt_bid(player_id, cards_data)
+        _send_game_state_update_to_room_players(game)
+        return jsonify({'success': True, 'message': 'Interrupt bid/pass submitted.'}), 200
+    except ValueError as e:
+        print(f"Interrupt bid validation error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        print(f"An unexpected error occurred during interrupt bid: {e}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': 'An unexpected server error occurred.'}), 500
 
 @app.route('/game_state', methods=['GET'])
 def get_current_game_state():
@@ -623,7 +666,7 @@ def on_leave_game_room_socket(data):
 @socketio.on('submit_interrupt_bid')
 def on_submit_interrupt_bid(data):
     """
-    Handles a player's attempt to submit an interrupt bid (e.g., playing 3s out of turn, or a higher bomb).
+    Handles a player's attempt to submit an interrupt bid (e.g., playing 3s out of turn).
     """
     room_code = data.get('room_code')
     player_id = data.get('player_id')
@@ -640,7 +683,7 @@ def on_submit_interrupt_bid(data):
     cards_to_play_objects = [Card(c['suit'], c['rank']) for c in cards_data]
 
     try:
-        game.add_interrupt_bid(player_id, cards_to_play_objects)
+        game.submit_interrupt_bid(player_id, cards_to_play_objects)
         print(f"DEBUG: Player {player_id} successfully submitted interrupt bid.")
         _send_game_state_update_to_room_players(game)
         emit('status', {'msg': 'Interrupt bid submitted.'}, room=request.sid)

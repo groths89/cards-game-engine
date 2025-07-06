@@ -1,4 +1,5 @@
 import random
+import time
 from game_engine.card import Card, Rank, Suit
 from game_engine.game_loop import GameLoop
 from game_engine.game_state import GameState
@@ -32,6 +33,9 @@ class AssholeGame(GameState):
         self.interrupt_initiator_player_id = None
         self.interrupt_rank = None
         self.interrupt_bids = []
+        self.interrupt_active_until = None
+        self.players_responded_to_interrupt = set()
+        self.INTERRUPT_TIMEOUT_SECONDS = 15
 
         if self.room_code:
             self.status = "WAITING"
@@ -69,6 +73,7 @@ class AssholeGame(GameState):
         self.interrupt_initiator_player_id = None
         self.interrupt_rank = None
         self.interrupt_bids = []
+        self.interrupt_original_skip_state = False
         self.cards_of_rank_played = {rank_str: 0 for rank_str in Rank.all_ranks()}
         self.rankings = {}
 
@@ -138,6 +143,21 @@ class AssholeGame(GameState):
         self.interrupt_rank = None
         self.interrupt_bids = []
 
+    def check_and_perform_four_of_a_kind_clear(self, player, played_rank_value, played_rank_str):
+        """
+        Checks if the current play resulted in 4 of a kind on the pile.
+        If so, clears the pile and sets the player as the current player.
+        Returns True if a clear occurred, False otherwise.
+        """
+        if self.cards_of_rank_played[played_rank_value] == 4:
+            self.game_message = f"{player.name} played all four {Card.get_rank_display(played_rank_str)}s! Pile cleared."
+            print(self.game_message)
+            self.clear_pile()
+            self.current_player_index = self.players.index(player)
+            self.advance_turn(skip_count=0)
+            return True
+        return False
+
     def play_cards(self, player_id, cards_to_play_data):
         """
         Overrides the play_turn method in GameState to implement Asshole-specific rules.
@@ -146,8 +166,11 @@ class AssholeGame(GameState):
         if not player:
             raise ValueError("Player not found in this game.")
         
+        # Check if interrupt is active
         if self.interrupt_active:
             raise ValueError(f"An interrupt of type '{self.interrupt_type}' is active. You cannot make a regular play now. Please use the interrupt action if available.")     
+        
+        # Basic turn validation
         if player_id != self.get_current_player_id():
             raise ValueError("It's not this player's turn.")
         if not player.is_active:
@@ -155,20 +178,23 @@ class AssholeGame(GameState):
 
         cards_to_play = [Card(c['suit'], c['rank'], id=c.get('id')) for c in cards_to_play_data]
         
+        if not cards_to_play:
+            raise ValueError("No cards selected to play.")        
+        
         # --- Basic checks (player's turn, has cards) ---
         current_player = self.get_current_player()
         if current_player != player:
-            print(f"It's not {player.name}'s turn.")
-            return
-        if not cards_to_play:
-            raise ValueError("No cards selected to play.")
+            raise ValueError("It's not this player's turn.")
         
-
+        # Check if player has the cards in their hand
         for card_to_play in cards_to_play:
             if card_to_play not in player.get_hand().cards:
-                print(f"{player.name} does not have the card {card_to_play} in their hand.")
-                return
+                raise ValueError(f"{player.name} does not have the card {card_to_play} in their hand.")
 
+        # Ensure all cards played are of the same rank
+        if len(cards_to_play) > 1 and not all(card.rank == cards_to_play[0].rank for card in cards_to_play):
+            raise ValueError("All cards played must be of the same rank.")
+        
         played_rank_str = cards_to_play[0].rank
         played_rank_value = cards_to_play[0].get_value()
         played_count = len(cards_to_play)
@@ -212,50 +238,100 @@ class AssholeGame(GameState):
 
         # --- General Play Rules (for non-2s, non-3s, and when no interrupt is active) ---
         if not self.pile:
+            # Player starts a new round (pile is empty)
             player.play_cards(cards_to_play)
             self.pile.extend(cards_to_play)
             self.current_play_rank = played_rank_value
             self.current_play_count = played_count
             self.consecutive_passes = 0
             self.same_rank_streak = 1
+            # Initialize count for this streak on the pile
             self.cards_of_rank_played[played_rank_value] = played_count
+
+            if self.check_and_perform_four_of_a_kind_clear(player, played_rank_value, played_rank_str):
+                return
+            
+            if 1 <= self.cards_of_rank_played[played_rank_value ] <= 3:
+                self.record_interrupt_initiation(
+                    'bomb_opportunity',
+                    player_id,
+                    played_rank_str,
+                    f"A {Card.get_rank_display(played_rank_str)} bomb opportunity! Other players can now play remaining {4 - self.cards_of_rank_played[played_rank_value]} {Card.get_rank_display(played_rank_str)}s."
+                )
+                return # Interrupt active, halt regular turn progression
+            
             self.game_message = f"{player.name} started a new round with {played_count} x {Card.get_rank_display(played_rank_str)}."
             self.advance_turn(skip_count=0)
         else:
+            # Player plays on an existing pile
+            # Rule: Must match the count of the last play
             if played_count != self.current_play_count:
-                raise ValueError(f"You must play {self.current_play_count} cards to match the pile.")
+                raise ValueError(f"You must play {self.current_play_count} card(s) to match the pile.")
             
+            # Rule: Must be higher rank OR same rank
             if played_rank_value > self.current_play_rank:
-                print(f"{player.name} has matched the rank. Skipping next player.")
+                # Playing a higher rank, same count
                 player.play_cards(cards_to_play)
                 self.pile.extend(cards_to_play)
-                self.current_play_rank = played_rank_value
+                
                 self.last_played_cards = cards_to_play
                 self.consecutive_passes = 0 # Reset passes on a successful play
                 self.same_rank_streak = 1
+                self.current_play_rank = played_rank_value
+                self.current_play_count = played_count
+
+                self.cards_of_rank_played = {rank: 0 for rank in range(2, 15)}
                 self.cards_of_rank_played[played_rank_value] += played_count
-                self.game_message = f"{player.name} played {played_count} x {Card.get_rank_display(played_rank_str)}."
-            elif played_rank_value == self.current_play_rank:
-                # --- Rule 3: Same Rank Play (Skipping next player, potentially leads to 4-of-a-kind clear) ---
-                player.play_cards(cards_to_play)
-                self.pile.extend(cards_to_play)
-                self.last_played_cards = cards_to_play # Important for bomb rule
-                self.consecutive_passes = 0 # Reset passes on a successful play
-                self.same_rank_streak += 1 # Increment streak
-                self.cards_of_rank_played[played_rank_value] += played_count # Track total of this rank on pile        
-                
-                if self.cards_of_rank_played[played_rank_value] == 4:
-                    # --- Rule 4: 4-of-a-Kind (Immediate Pile Clear) ---
-                    self.game_message = f"{player.name} played all four {Card.get_rank_display(played_rank_str)}s! Pile cleared."
-                    print(self.game_message) # For backend logging
-                    self.clear_pile()
-                    self.current_player_index = self.players.index(player)
-                    self.advance_turn(skip_count=0)
+
+                if self.check_and_perform_four_of_a_kind_clear(player, played_rank_value, played_rank_str):
                     return
                 
-                # If not a 4-of-a-kind bomb, apply skip rule
+                self.game_message = f"{player.name} played {played_count} x {Card.get_rank_display(played_rank_str)} (higher rank)."
+
+                # Check for bomb opportunity if this play results in 1, 2, or 3 of the new rank on the pile
+                if 1 <= self.cards_of_rank_played[played_rank_value] <= 3:
+                    self.record_interrupt_initiation(
+                        'bomb_opportunity',
+                        player_id,
+                        played_rank_str,
+                        f"A {Card.get_rank_display(played_rank_str)} bomb opportunity! Other players can now play remaining {4 - self.cards_of_rank_played[played_rank_value]} {Card.get_rank_display(played_rank_str)}s."
+                    )
+                    return
+                
+                self.advance_turn(skip_count=0)
+
+            elif played_rank_value == self.current_play_rank:
+                # --- Rule: Same Rank Play (Skipping next player) ---
+                print(f"{player.name} has matched the rank. Skipping next player.")
+                player.play_cards(cards_to_play)
+                self.pile.extend(cards_to_play)
+                self.last_played_cards = cards_to_play
+                self.consecutive_passes = 0
+                self.same_rank_streak += 1
+                self.cards_of_rank_played[played_rank_value] += played_count        
+                
+                if self.check_and_perform_four_of_a_kind_clear(player, played_rank_value, played_rank_str):
+                    return
+                
+                # If not a 4-of-a-kind bomb by current player, but creates a bomb opportunity for others.
+                # This happens if self.cards_of_rank_played[played_rank_value] is now 1, 2, or 3.
+                current_rank_total = self.cards_of_rank_played[played_rank_value]
+                if 1 <= current_rank_total <= 3:
+                    self.record_interrupt_initiation(
+                        'bomb_opportunity',
+                        player_id,
+                        played_rank_str,
+                        f"A {Card.get_rank_display(played_rank_str)} bomb opportunity! Other players can now play remaining {4 - current_rank_total} {Card.get_rank_display(played_rank_str)}s."
+                    )
+                    return # Interrupt active, halt regular turn progression
+
+                # If no 4-of-a-kind was achieved, and no bomb opportunity was initiated, then apply skip rule
                 self.should_skip_next_player = True
                 self.game_message = f"{player.name} matched the rank! Next player will be skipped."
+                
+                # Advance the turn, applying the skip
+                self.advance_turn(skip_count=1 if self.should_skip_next_player else 0)
+                self.should_skip_next_player = False
 
             else:
                 raise ValueError(f"Your play ({Card.get_rank_display(played_rank_str)}) must be higher than or match the current top card ({Card.get_rank_display(played_rank_str)}).")
@@ -344,14 +420,26 @@ class AssholeGame(GameState):
         self.interrupt_initiator_player_id = initiator_player_id
         self.interrupt_rank = interrupt_rank
         self.interrupt_bids = []
+        self.interrupt_active_until = time.time() + self.INTERRUPT_TIMEOUT_SECONDS
+        self.players_responded_to_interrupt = set()
+
+        self.players_responded_to_interrupt.add(initiator_player_id)
+
+        for player in self.players:
+            if player.is_out and player.player_id not in self.players_responded_to_interrupt:
+                self.players_responded_to_interrupt.add(player.player_id)
+        
         self.game_message = message
-        print(f"Interrupt initiated: Type={interrupt_type}, Initiator={initiator_player_id}, Rank={interrupt_rank}")
+        self.interrupt_original_skip_state = self.should_skip_next_player
+        self.should_skip_next_player = False
+        print(f"DEBUG: Interrupt of type '{interrupt_type}' initiated by {initiator_player_id} for rank {interrupt_rank}. Active until {self.interrupt_active_until}")
 
 
     def add_interrupt_bid(self, player_id, cards_data):
         """
         Allows a player to submit a bid during an active interrupt window.
         """
+        print(f"DEBUG: cards_data received: {cards_data}")
         if not self.interrupt_active:
             raise ValueError("No interrupt is currently active to bid on.")
         if player_id == self.interrupt_initiator_player_id:
@@ -386,18 +474,20 @@ class AssholeGame(GameState):
                 raise ValueError("You have already submitted a bid for this three-play interrupt.")
 
         elif self.interrupt_type == 'bomb_opportunity':
-            # A "bomb" is usually 4 of a kind, higher than the rank that triggered it.
-            if len(cards_to_play) != 4 or not all(card.rank == cards_to_play[0].rank for card in cards_to_play):
-                raise ValueError("A bomb must be exactly 4 cards of the same rank.")
-            
+            # A "bomb" is always 4 of a kind, and completes the set of 4 for the current rank on pile.
             bomb_rank = cards_to_play[0].rank
-            if bomb_rank <= self.interrupt_rank:
-                raise ValueError(f"Your bomb ({Card.get_rank_display(bomb_rank)}) must be higher than the interrupted rank ({Card.get_rank_display(bomb_rank)}).")
             
-            player_hand_cards_of_rank = player.get_hand().get_cards_by_rank(bomb_rank)
-            if len(player_hand_cards_of_rank) < 4:
-                raise ValueError(f"You do not have 4 cards of rank {Card.get_rank_display(bomb_rank)} in your hand to play this bomb.")
+            if not all(card.rank == bomb_rank for card in cards_to_play):
+                raise ValueError("A bomb must consist of cards of the same rank.")
+
+            if bomb_rank != self.interrupt_rank:
+                raise ValueError(f"Your bomb ({Card.get_rank_display(bomb_rank)}) must be of the same rank as the current play ({Card.get_rank_display(self.interrupt_rank)}).")
+
+            num_on_pile_of_rank = self.cards_of_rank_played.get(Card._numeric_rank_map.get(bomb_rank), 0)
             
+            if len(cards_to_play) + num_on_pile_of_rank != 4:
+                raise ValueError(f"To play a bomb, you must play exactly {4 - num_on_pile_of_rank} cards of rank {Card.get_rank_display(bomb_rank)} to complete a set of four.")
+
             if any(bid[0] == player_id for bid in self.interrupt_bids):
                 raise ValueError("You have already submitted a bid for this bomb opportunity.")
 
@@ -408,6 +498,78 @@ class AssholeGame(GameState):
         self.game_message = f"{player.name} has submitted an interrupt bid."
         print(f"Player {player_id} bid on interrupt with: {[str(c) for c in cards_to_play]}")
 
+    def submit_interrupt_bid(self, player_id, cards_data=None):
+        """
+        Allows a player to submit cards for an interrupt bid or pass on the interrupt.
+        cards_data: list of card dictionaries if bidding, None if passing.
+        """
+        if not self.interrupt_active:
+            raise ValueError("No interrupt is currently active.")
+        if player_id in self.players_responded_to_interrupt:
+            raise ValueError("You have already responded to this interrupt.")
+        if player_id == self.interrupt_initiator_player_id:
+            raise ValueError("You initiated this interrupt opportunity and cannot bid on it.")
+
+        player = self.get_player_by_id(player_id)
+        if not player or player.is_out:
+            raise ValueError("Only active players can respond to an interrupt.")
+
+        self.players_responded_to_interrupt.add(player_id)
+
+        if cards_data:
+            cards_to_bid = [Card(c['suit'], c['rank'], id=c.get('id')) for c in cards_data]
+            if not cards_to_bid:
+                raise ValueError("No cards selected for interrupt bid.")
+            
+            # --- Basic Validation for the bid ---
+            if self.interrupt_type == 'three_play':
+                if not (len(cards_to_bid) == 1 and cards_to_bid[0].rank == Rank.THREE):
+                    raise ValueError("For a three-play interrupt, you must play exactly one 3.")
+            elif self.interrupt_type == 'bomb_opportunity':
+                if not (len(cards_to_bid) == 4 and all(c.rank == cards_to_bid[0].rank for c in cards_to_bid)):
+                    raise ValueError("A bomb bid must be exactly 4 cards of the same rank.")
+                if cards_to_bid[0].get_value() != self.interrupt_rank:
+                     raise ValueError(f"Bomb bid must be for rank {Card.get_rank_display(self.interrupt_rank)}.")
+            else:
+                raise ValueError("Invalid interrupt type to bid on.")
+
+            # Check if player actually has the cards they are trying to bid
+            for card_to_bid in cards_to_bid:
+                if card_to_bid not in player.get_hand().cards:
+                    raise ValueError(f"You do not have the card {card_to_bid} in your hand for the bid.")
+            
+            # Store the valid bid
+            self.interrupt_bids.append({
+                'player_id': player_id,
+                'cards': cards_to_bid,
+                'bid_time': time.time()
+            })
+            self.game_message = f"{player.name} placed a bid for the {self.interrupt_type} interrupt."
+            print(f"DEBUG: {player.name} submitted interrupt bid: {cards_data}")
+        else:
+            self.game_message = f"{player.name} passed on the {self.interrupt_type} interrupt."
+            print(f"DEBUG: {player.name} passed on interrupt.")
+
+        # Check if all relevant players have responded.
+        # Relevant players are all active players minus the initiator.
+        all_active_players_except_initiator = {pid for pid in self.get_active_player_ids() if pid != self.interrupt_initiator_player_id}
+
+        if self.players_responded_to_interrupt.issuperset(all_active_players_except_initiator):
+            print("DEBUG: All players have responded to the interrupt. Resolving now.")
+            self.resolve_interrupt()
+        else:
+            print(f"DEBUG: {len(self.players_responded_to_interrupt)}/{len(all_active_players_except_initiator) + 1} players responded.") # +1 to include initiator in total count
+
+    def get_active_player_ids(self):
+        """Returns a set of player IDs for players who are still in the game."""
+        return {p.player_id for p in self.players if not p.is_out}
+
+    def get_player_by_id(self, player_id):
+        """Helper to get a player object by their ID."""
+        for player in self.players:
+            if player.player_id == player_id:
+                return player
+        return None
 
     def resolve_interrupt(self):
         """
@@ -422,66 +584,101 @@ class AssholeGame(GameState):
         winning_cards = []
         
         all_relevant_plays = []
-        if self.last_played_cards and self.last_played_cards[0].rank == self.interrupt_rank:
-             all_relevant_plays.append((self.interrupt_initiator_player_id, self.last_played_cards))
-        
         all_relevant_plays.extend(self.interrupt_bids)
 
         if self.interrupt_type == 'three_play':
-            if all_relevant_plays:
-                all_relevant_plays.sort(key=lambda x: len(x[1]), reverse=True)
+            # Logic to find the winning bid for a 3-play
+            highest_bid_count = 0
+            for bid in self.interrupt_bids:
+                bid_count = len(bid['cards'])
+                # Only consider valid 3-play bids (should be pre-validated in submit_interrupt_bid too)
+                if all(c.rank == Rank.THREE for c in bid['cards']):
+                    if bid_count > highest_bid_count:
+                        highest_bid_count = bid_count
+                        winner_id = bid['player_id']
+                        winning_bid_cards = bid['cards']
+                    elif bid_count == highest_bid_count:
+                        # Tie-breaking rule for 3s: e.g., player earliest in turn order or first to bid.
+                        # For simplicity, if tied, the first one submitted wins.
+                        pass # Current logic keeps the first highest bid in the list
+
+            if winning_bid_cards: # If someone successfully bid and won
+                winner = self.get_player_by_id(winner_id)
+                if not winner:
+                    raise Exception("Interrupt winner not found.")
+
+                # Remove cards from winner's hand
+                for card_to_remove in winning_bid_cards:
+                    if card_to_remove in winner.hand.cards: # Ensure card is still in hand
+                        winner.hand.cards.remove(card_to_remove)
+                    else:
+                        print(f"WARNING: Card {card_to_remove} not found in {winner.name}'s hand during 3-play interrupt resolution.")
                 
-                winner_player_id = all_relevant_plays[0][0]
-                winning_cards = all_relevant_plays[0][1]
+                self.pile.extend(winning_bid_cards) # Add winning 3s to the pile
+                self.clear_pile() # A successful 3-play clears the pile
+                self.game_message = f"{winner.name} won the 3-play interrupt by playing {len(winning_bid_cards)} three(s)! They clear the pile and start the next round."
+                self.current_player_index = self.players.index(winner) # Winner starts next round
 
-                for p_id, played_cards in all_relevant_plays:
-                    if p_id != self.interrupt_initiator_player_id:
-                        player_obj = self.get_player_by_id(p_id)
-                        if player_obj and p_id == winner_player_id:
-                            player_obj.play_cards(played_cards)
-                            self.pile.extend(played_cards)
-                            print(f"DEBUG: Player {player_obj.name} played {len(played_cards)} 3s as winning interrupt bid.")
-                        elif player_obj:
-                             print(f"DEBUG: Player {player_obj.name} played {len(played_cards)} 3s as losing interrupt bid (cards not removed from hand for now).")
-
-            self.clear_pile()
-            self.game_message = f"{self.get_player_by_id(winner_player_id).name} won the 3-play! New round starts with them."
-            self.current_player_index = self.players.index(self.get_player_by_id(winner_player_id))
+            else: # No one successfully countered the 3-play
+                self.game_message = f"No one countered the 3-play interrupt. The play stands."
+                # The turn should remain with the player who initiated the 3-play.
+                self.current_player_index = self.players.index(self.get_player_by_id(self.interrupt_initiator_player_id))
+            
+            # Reset threes_played_this_round after resolution (this is important)
             self.threes_played_this_round = 0
 
         elif self.interrupt_type == 'bomb_opportunity':
-            all_bomb_bids = [bid for bid in all_relevant_plays if len(bid[1]) == 4 and bid[1][0].rank > self.interrupt_rank]
+            # For bomb, usually the first valid bomb bid wins.
+            winning_bomb_bid = None
+            for bid in self.interrupt_bids:
+                # Check if it's a valid 4-of-a-kind of the correct rank
+                if (len(bid['cards']) == 4 and 
+                    all(c.rank == Card.get_rank_display(self.interrupt_rank) for c in bid['cards']) and
+                    all(c.get_value() == self.interrupt_rank for c in bid['cards'])): # Double check rank value too
+                    
+                    # Also, re-confirm the player actually has these cards (safety check)
+                    player_bid = self.get_player_by_id(bid['player_id'])
+                    if player_bid and all(c in player_bid.hand.cards for c in bid['cards']):
+                        winning_bomb_bid = bid
+                        break # Found the first valid winning bomb bid
             
-            if all_bomb_bids:
-                all_bomb_bids.sort(key=lambda bid: bid[1][0].rank, reverse=True)
+            if winning_bomb_bid:
+                winner_id = winning_bomb_bid['player_id']
+                winning_bid_cards = winning_bomb_bid['cards']
+                winner = self.get_player_by_id(winner_id)
+                if not winner:
+                    raise Exception("Bomb interrupt winner not found.")
+
+                for card_to_remove in winning_bid_cards:
+                    if card_to_remove in winner.hand.cards:
+                        winner.hand.cards.remove(card_to_remove)
+                    else:
+                        print(f"WARNING: Card {card_to_remove} not found in {winner.name}'s hand during bomb resolution.")
                 
-                winner_player_id = all_bomb_bids[0][0]
-                winning_cards = all_bomb_bids[0][1]
-
-                winner_player_obj = self.get_player_by_id(winner_player_id)
-                if winner_player_obj:
-                    winner_player_obj.play_cards(winning_cards)
-                    self.pile.extend(winning_cards)
-                    print(f"DEBUG: Player {winner_player_obj.name} played a bomb of {winning_cards[0].rank}s!")
-
-            self.clear_pile()
-            self.game_message = f"{self.get_player_by_id(winner_player_id).name} played the winning bomb! New round starts with them."
-            self.current_player_index = self.players.index(self.get_player_by_id(winner_player_id))
-            self.cards_of_rank_played = {rank: 0 for rank in range(2, 15)}
+                self.pile.extend(winning_bid_cards)
+                self.clear_pile() # Bomb clears the pile
+                self.game_message = f"{winner.name} successfully bombed the pile with {Card.get_rank_display(self.interrupt_rank)}s! They clear the pile and start the next round."
+                self.current_player_index = self.players.index(winner) # Winner starts next round
+            else:
+                self.game_message = f"No one successfully bombed the {Card.get_rank_display(self.interrupt_rank)}s. The play stands."
+                # The turn should remain with the player who initiated the bomb opportunity.
+                self.current_player_index = self.players.index(self.get_player_by_id(self.interrupt_initiator_player_id))
 
         else:
             self.game_message = "Interrupt resolved without a clear winner or unrecognized type. Turn proceeds."
-            self.clear_pile()
             initiator_player_obj = self.get_player_by_id(self.interrupt_initiator_player_id)
             if initiator_player_obj and initiator_player_obj.is_active and not initiator_player_obj.is_out:
                 self.current_player_index = self.players.index(initiator_player_obj)
-            self.game_message = "Interrupt resolved. New round starts."
+            self.game_message = "Interrupt resolved." 
 
+        # Always reset interrupt state after resolution
         self.interrupt_active = False
         self.interrupt_type = None
         self.interrupt_initiator_player_id = None
         self.interrupt_rank = None
         self.interrupt_bids = []
+        self.interrupt_active_until = None
+        self.players_responded_to_interrupt = set()
 
     def get_winner(self):
         if not self.is_game_over:
