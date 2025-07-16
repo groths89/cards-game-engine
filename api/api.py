@@ -8,6 +8,7 @@ import uuid
 import random
 import traceback
 import time
+import threading
 
 # Get the absolute path to the project root directory (one level up from 'api')
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -79,11 +80,18 @@ def _get_game_state_for_player(game, player_id):
 
     interrupt_bids_data = []
     if game.interrupt_bids:
-        for bid_player_id, bid_cards in game.interrupt_bids:
-            interrupt_bids_data.append({
+        for bid_entry in game.interrupt_bids:
+            bid_player_id = bid_entry['player_id']
+            bid_cards_data = [card.to_dict() for card in bid_entry['cards']]
+
+            frontend_bid_entry = {
                 'player_id': bid_player_id,
-                'cards': [c.to_dict() for c in bid_cards]
-            })
+                'cards': bid_cards_data,
+                'bid_time': bid_entry['bid_time'],
+                'cards_played_in_bomb': bid_entry.get('cards_played_in_bomb')
+            }
+
+            interrupt_bids_data.append(frontend_bid_entry)
 
     return {
         'room_code': game.room_code,
@@ -154,6 +162,48 @@ def _send_game_state_update_to_room_players(game):
                 print(f"WARNING: Could not get game state for player {p.name} ({p.player_id}) in room {game.room_code}")
         else:
             print(f"DEBUG: Player {p.name} ({p.player_id}) in room {game.room_code} has no active SID in player_id_map. Cannot send direct update.")
+
+def game_timer_monitor():
+    """
+    Background thread that monitors active game timers (e.g., interrupt timers).
+    """
+    print("DEBUG: Game timer monitor thread started.")
+    while True:
+        for room_code, game in list(active_games.items()):
+            if game.interrupt_active:
+                should_resolve_interrupt = False
+                
+                active_players_count = sum(1 for p in game.players if p.is_active)
+
+                if game.interrupt_type == 'bomb_opportunity':                    
+                    timer_expired = False
+                    if game.interrupt_active_until is not None:
+                        timer_expired = (time.time() >= game.interrupt_active_until)
+
+                    all_responded = (len(game.players_responded_to_interrupt) >= active_players_count)
+
+                    if timer_expired:
+                        print(f"DEBUG: Bomb interrupt timed out for room {room_code}.")
+                        should_resolve_interrupt = True
+                    elif all_responded:
+                        print(f"DEBUG: Bomb interrupt: All active players responded for room {room_code}.")
+                        should_resolve_interrupt = True
+
+                elif game.interrupt_type == 'three_play':
+                    all_responded = (len(game.players_responded_to_interrupt) >= active_players_count)
+                    if all_responded:
+                        print(f"DEBUG: Three-play interrupt: All active players passed for room {room_code}.")
+                        should_resolve_interrupt = True
+                
+                if should_resolve_interrupt:
+                    if game.interrupt_active: 
+                        game.resolve_interrupt()
+                        with app.app_context():
+                            _send_game_state_update_to_room_players(game)
+
+            time.sleep(0.01) 
+        
+        time.sleep(1)
 
 # --- HTTP API Endpoints ---
 @app.route("/")
@@ -472,8 +522,8 @@ def pass_turn():
 
         _send_game_state_update_to_room_players(game)
 
-        game_state_payload = _get_game_state_for_player(game, player_id)
-        if not game_state_payload:
+        game_state = _get_game_state_for_player(game, player_id)
+        if not game_state:
             raise Exception("Failed to get game state after passing turn.")
         return jsonify({'message': 'Turn passed', 'game_state': game_state}), 200
     except ValueError as e:
@@ -500,6 +550,7 @@ def submit_interrupt_bid_route():
         return jsonify({'success': True, 'message': 'Interrupt bid/pass submitted.'}), 200
     except ValueError as e:
         print(f"Interrupt bid validation error: {e}")
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
         print(f"An unexpected error occurred during interrupt bid: {e}")
@@ -553,7 +604,7 @@ def handle_connect():
     socketio.emit('room_update', _get_all_rooms_state())
 
 @socketio.on('disconnect')
-def handle_disconnect():
+def handle_disconnect(sid):
     """
     Handles a client WebSocket disconnection.
     Removes the player's SID mapping and logs the disconnection.
@@ -697,4 +748,7 @@ def on_submit_interrupt_bid(data):
 
 if __name__ == '__main__':
     print("Starting Flask-SocketIO server...")
+    timer_thread = threading.Thread(target=game_timer_monitor, daemon=True)
+    timer_thread.start()
+    
     socketio.run(app, debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
