@@ -1,34 +1,63 @@
-import eventlet
-
-eventlet.monkey_patch()
-
-import sys
-import os
+from datetime import datetime, timezone
 import uuid
+import os
+import sys
 import random
-import traceback
 import time
 import threading
+import traceback
 
-# Get the absolute path to the project root directory (one level up from 'api')
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+# Manually set environment variables for local development
+if not os.environ.get('ENVIRONMENT'):
+    os.environ['ENVIRONMENT'] = 'local'
+    os.environ['USERS_TABLE'] = 'gregs-games-users-local'
+    os.environ['GAME_HISTORY_TABLE'] = 'gregs-games-history-local'
+    os.environ['AWS_ACCESS_KEY_ID'] = 'dummy'
+    os.environ['AWS_SECRET_ACCESS_KEY'] = 'dummy'
+    os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
+    os.environ['DYNAMODB_ENDPOINT'] = 'http://localhost:8000'
+    os.environ['COGNITO_USER_POOL_ID'] = 'us-east-1_esUPZHWY4'
+    os.environ['COGNITO_APP_CLIENT_ID'] = '2rr03i7clo2f8lmu1qp1d1jtto'
+    os.environ['COGNITO_IDENTITY_POOL_ID'] = 'us-east-1:dcbc5711-2abf-4bc8-9298-0c2d4e135e11'
+    os.environ['COGNITO_REGION'] = 'us-east-1'
+    print("Local environment variables set")
 
-# Add the project root to sys.path if it's not already there
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
+print("Starting imports...")
+print(f"Environment: {os.environ.get('ENVIRONMENT', 'not set')}")
 
 from flask import Flask, request, jsonify, session
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
+
+print("Flask imports successful...")
+
+from database.dynamodb_client import db_client
+from database.user_service import user_service
+from database.game_history_service import game_history_service
+
+print("Database imports successful...")
+
+from api.auth_utils import require_auth, get_current_user, verify_cognito_token
+
+print("Auth imports successful...")
 
 from game_engine.player import Player
 from game_engine.game_loop import GameLoop
 from game_engine.games.asshole import AssholeGame
 from game_engine.card import Card
 
+print("Game engine imports successful...")
+print("All imports completed successfully!")
+
 app = Flask(__name__)
+print("Flask app created...")
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'my_dev_key')
+
+if os.environ.get('ENVIRONMENT') == 'local':
+    try:
+        db_client.create_tables()
+    except Exception as e:
+        print(f"Warning: Could not initialize database tables: {e}")
 
 frontend_origins = [
     "http://localhost:3000",
@@ -37,7 +66,7 @@ frontend_origins = [
 ]
 frontend_origins = [origin for origin in frontend_origins if origin is not None]
 
-CORS(app, resources={r"/*": {"origins": frontend_origins}})
+CORS(app, resources={r"/*": {"origins": frontend_origins}}, supports_credentials=True)
 
 socketio = SocketIO(app, cors_allowed_origins=frontend_origins, async_mode='eventlet')
 
@@ -133,23 +162,69 @@ def _check_and_resolve_interrupts(game):
             traceback.print_exc()
 
 def _get_all_rooms_state():
-    """Helper to get state of all active rooms for lobby updates"""
-    lobbies_data = []
-    for room_code, game in active_games.items():
-        lobbies_data.append({
-            "room_code": room_code,
-            "game_type": game.game_type,
-            "host_name": game.get_player_by_id(game.host_id).name if game.host_id else "Unknown",
-            "current_players": game.get_num_players(),
-            "max_players": game.MAX_PLAYERS,
-            "status": game.status,
-            "game_started": game.is_game_started
-        })        
-    return { "success": True, "rooms": lobbies_data }
+    """Enhanced room state with player profiles."""
+    try:
+        rooms = []
+        for room_code, game in active_games.items():
+            # Get enhanced player info
+            players_info = []
+            for player in game.players:
+                player_info = {
+                    'id': player.player_id,
+                    'name': player.name,
+                    'isHost': player.player_id == game.host_id
+                }
+                
+                # Add profile info if available
+                try:
+                    profile = user_service.get_user_profile(player.player_id)
+                    if profile:
+                        player_info.update({
+                            'gamesWon': profile.get('gamesWon', 0),
+                            'winRate': profile.get('winRate', 0),
+                            'userType': profile.get('userType', 'anonymous')
+                        })
+                except:
+                    pass
+                
+                players_info.append(player_info)
+            
+            # Find the host player to get their name
+            host_player = next((p for p in game.players if p.player_id == game.host_id), None)
+            host_name = host_player.name if host_player else "Unknown"
+            
+            room_info = {
+                'room_code': room_code,
+                'game_type': getattr(game, 'game_type', 'asshole'),
+                'status': getattr(game, 'status', 'WAITING_FOR_PLAYERS'),
+                'player_count': len(game.players),
+                'max_players': getattr(game, 'MAX_PLAYERS', 6),
+                'host_id': game.host_id,
+                'host_name': host_name,
+                'players': players_info,
+                'created_at': getattr(game, 'created_at', datetime.now(timezone.utc).isoformat()),
+                'is_game_started': getattr(game, 'is_game_started', False)
+            }
+            rooms.append(room_info)
+        
+        return {'success': True, 'rooms': rooms}
+    except Exception as e:
+        print(f"Error getting rooms state: {e}")
+        return {'success': False, 'rooms': []}
 
 def _send_game_state_update_to_room_players(game):
     """Sends each player in the game their individual game state update."""
     _check_and_resolve_interrupts(game)
+    
+    # Save game results if game just completed
+    if game.is_game_over and not getattr(game, '_results_saved', False):
+        try:
+            game_history_service.save_game_result(game)
+            game._results_saved = True  # Prevent duplicate saves
+            print(f"Game results saved for room {game.room_code}")
+        except Exception as e:
+            print(f"Warning: Could not save game results for room {game.room_code}: {e}")
+    
     print(f"DEBUG: Preparing game_state_update for room {game.room_code} (players: {len(game.players)})")
     for p in game.players:
         if player_id_map.get(p.player_id):
@@ -205,6 +280,46 @@ def game_timer_monitor():
         
         time.sleep(1)
 
+def _ensure_user_profile(player_id, player_name):
+    """Ensure user has a profile in the database (optional, non-blocking)"""
+    try:
+        user_service.get_or_create_user(player_id, player_name, "anonymous")
+    except Exception as e:
+        print(f"Warning: Could not create/update user profile for {player_id}: {e}")
+
+def _handle_game_completion(game, winner_id):
+    """Handle game completion and update user stats."""
+    try:
+        for player in game.players:
+            games_played_delta = 1
+            games_won_delta = 1 if player.player_id == winner_id else 0
+            
+            user_service.update_user_stats(
+                player.player_id, 
+                games_played_delta, 
+                games_won_delta
+            )
+        
+        print(f"Updated stats for game completion. Winner: {winner_id}")
+    except Exception as e:
+        print(f"Error updating game stats: {e}")
+
+voice_chat_participants = {}
+def broadcast_voice_users_update(room_code):
+    """Helper function to get and broadcast the current list of voice users."""
+    users_in_room = []
+    if room_code in voice_chat_participants:
+        for player_id, user_data in voice_chat_participants[room_code].items():
+            users_in_room.append({
+                'id': player_id,
+                'name': user_data['name'],
+                'isMuted': user_data.get('is_muted', False),
+                'isSpeaking': user_data.get('is_speaking', False)
+            })
+    
+    print(f"Broadcasting voice_users_update for room {room_code}: {users_in_room}")
+    emit('voice_users_update', users_in_room, room=f"voice_{room_code}")
+
 # --- HTTP API Endpoints ---
 @app.route("/")
 def home():
@@ -224,6 +339,13 @@ def create_room():
     if not player_name:
         return jsonify({"success": False, "message": "Player name is required to create a room."}), 400
 
+    # Create/update user profile
+    try:
+        user_profile = user_service.get_or_create_user(player_id, player_name, "anonymous")
+        print(f"User profile created/updated for {player_name}")
+    except Exception as e:
+        print(f"Warning: Could not create/update user profile for {player_id}: {e}")
+
     room_code = generate_unique_room_code()
     host_id = player_id
 
@@ -235,17 +357,22 @@ def create_room():
 
     try:
         new_game = GameClass(room_code=room_code, host_id=host_id, game_type=game_type)
+        new_game.created_at = datetime.utcnow().isoformat()  # Add timestamp
+        
         host_player_obj = Player(player_id=host_id, name=player_name)
         new_game.add_player(host_player_obj)
         new_game.status = "WAITING_FOR_PLAYERS"
         active_games[room_code] = new_game
-        print(f"DEBUG_CREATE_ROOM_ACTIVE_GAMES_ID: {id(active_games)}")
-        print(f"DEBUG_CREATE_ROOM_AFTER_ADD_KEYS: {list(active_games.keys())}")
         player_to_room_map[player_id] = room_code
         
+        # Broadcast enhanced room update
         socketio.emit('room_update', _get_all_rooms_state())
-        print(f"Emitted room_update after create_room for room {room_code}")
-
+        socketio.emit('room_created', {
+            'room_code': room_code,
+            'host_name': player_name,
+            'game_type': game_type
+        })
+        
         _send_game_state_update_to_room_players(new_game)
 
         game_state_payload = _get_game_state_for_player(new_game, host_id)
@@ -257,7 +384,8 @@ def create_room():
             'room_code': room_code,
             'player_id': player_id,
             'player_name': player_name,
-            'game_state': game_state_payload
+            'game_state': game_state_payload,
+            'user_profile': user_profile
         }), 201
     except Exception as e:
         print(f"Error creating room: {e}")
@@ -281,6 +409,9 @@ def join_room_http():
         return jsonify({'error': 'Room code must be 4 characters.'}), 400
     if not player_name:
         return jsonify({'error': 'Player name cannot be empty'}), 400
+
+    # Create/update user profile (optional, non-blocking)
+    _ensure_user_profile(player_id, player_name)
 
     game = active_games.get(room_code)
 
@@ -575,17 +706,239 @@ def get_current_game_state():
         return jsonify({'error': 'Player not found in this game or invalid game state.'}), 404
     return jsonify(game_state_data), 200
 
+@app.route('/user_profile', methods=['GET'])
+def get_user_profile():
+    """Get user profile information."""
+    player_id = request.args.get('player_id')
+    
+    print(f"Getting user profile for player_id: {player_id}")
+    
+    if not player_id:
+        return jsonify({'error': 'Player ID required'}), 400
+    
+    try:
+        profile = user_service.get_user_profile(player_id)
+        print(f"Profile found: {profile}")
+        
+        if not profile:
+            print(f"No profile found for player_id: {player_id}")
+            return jsonify({'error': 'User not found'}), 404
+        
+        return jsonify(profile), 200
+    except Exception as e:
+        print(f"Error getting user profile: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': 'Failed to get user profile'}), 500
+
+@app.route('/update_profile', methods=['POST'])
+def update_user_profile():
+    """Update user profile."""
+    data = request.get_json()
+    player_id = data.get('player_id')
+    
+    if not player_id:
+        return jsonify({'error': 'Player ID required'}), 400
+    
+    try:
+        # Update user preferences
+        preferences = data.get('preferences', {})
+        if preferences:
+            user = user_service.get_user(player_id)
+            if user:
+                current_prefs = user.get('userPreferences', {})
+                current_prefs.update(preferences)
+                
+                success = user_service.db.update_item('users', {'userId': player_id}, {
+                    'userPreferences': current_prefs
+                })
+                
+                if success:
+                    return jsonify({'message': 'Profile updated successfully'}), 200
+        
+        return jsonify({'error': 'Failed to update profile'}), 500
+    except Exception as e:
+        print(f"Error updating profile: {e}")
+        return jsonify({'error': 'Failed to update profile'}), 500
+
+@app.route('/auth/register', methods=['POST'])
+def auth_register():
+    """Register a new user with Cognito and create profile."""
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    email = data.get('email')
+    
+    if not all([username, password, email]):
+        return jsonify({'error': 'Username, password, and email required'}), 400
+    
+    try:
+        # Create Cognito user
+        from api.auth_utils import create_cognito_user
+        cognito_result = create_cognito_user(username, password, email)
+        
+        if cognito_result and cognito_result.get('success'):
+            # Create user profile in our database
+            user_id = cognito_result['user_id']
+            user_profile = user_service.create_user(user_id, username, "authenticated", email)
+            
+            if user_profile:
+                return jsonify({
+                    'success': True,
+                    'message': 'User registered successfully',
+                    'user_id': user_id,
+                    'username': username
+                }), 201
+        
+        return jsonify({
+            'success': False, 
+            'error': cognito_result.get('error', 'Failed to register user')
+        }), 400
+        
+    except Exception as e:
+        print(f"Error registering user: {e}")
+        return jsonify({'success': False, 'error': 'Registration failed'}), 500
+
+@app.route('/auth/login', methods=['POST'])
+def auth_login():
+    """Authenticate user with Cognito."""
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    
+    if not all([username, password]):
+        return jsonify({'error': 'Username and password required'}), 400
+    
+    try:
+        from api.auth_utils import authenticate_cognito_user
+        auth_result = authenticate_cognito_user(username, password)
+        
+        if auth_result and auth_result.get('success'):
+            # Get user profile
+            user_profile = user_service.get_user_profile(auth_result['user_id'])
+
+            # Add this for session management
+            session['player_id'] = auth_result['user_id']
+            # If you also want to store username in session:
+            # session['username'] = username # (Assuming Cognito username is consistent with your profile username)
+
+            return jsonify({
+                'success': True,
+                'access_token': auth_result['access_token'],
+                'id_token': auth_result['id_token'],
+                'user_id': auth_result['user_id'],
+                'profile': user_profile
+            }), 200
+        
+        return jsonify({
+            'success': False,
+            'error': auth_result.get('error', 'Authentication failed')
+        }), 401
+        
+    except Exception as e:
+        print(f"Error during login: {e}")
+        return jsonify({'success': False, 'error': 'Login failed'}), 500
+
+@app.route('/auth/mock_login', methods=['POST'])
+def mock_login():
+    """Mock login for local testing without Cognito.
+    Generates a consistent UUID for mock users based on their username.
+    """
+    data = request.get_json()
+    username = data.get('username', 'testuser') # e.g., 'test@example.com'
+
+    # Generate a predictable UUID based on the username.
+    # This ensures that 'test@example.com' always maps to the same UUID,
+    # making your mock users consistent across restarts and allowing profile retrieval.
+    # We use NAMESPACE_DNS and the username to create a UUIDv5, which is deterministic.
+    mock_user_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, username))
+
+    try:
+        print(f"Mock login attempt for username: {username}")
+        print(f"Generated mock_user_id (UUID format): {mock_user_uuid}")
+
+        # Try to get existing user profile using the generated UUID
+        profile_response = user_service.get_user_profile(mock_user_uuid)
+        profile = profile_response.get('profile') # Extract the profile dictionary if success is True
+
+        if not profile:
+            # If no profile found with this UUID, create a new mock user profile
+            print(f"No profile found for user_id: {mock_user_uuid}. Creating new mock user profile.")
+            # Call create_user with the generated UUID, consistent with your DB schema
+            create_result = user_service.create_user(mock_user_uuid, username, "mock", f"{username}@test.com")
+
+            if create_result.get('success'):
+                profile = create_result['profile']
+                print(f"Created profile: {profile}")
+            else:
+                # Handle error if profile creation fails
+                print(f"Error creating mock user profile: {create_result.get('error')}")
+                return jsonify({'success': False, 'error': create_result.get('error', 'Failed to create mock user profile')}), 500
+        else:
+            print(f"Existing profile found for user_id: {mock_user_uuid}: {profile}")
+
+        # Set the session with the correct UUID
+        session['player_id'] = mock_user_uuid
+        session['username'] = username # Keep username in session for display if needed
+
+        return jsonify({
+            'success': True,
+            'access_token': 'mock_token', # Mock token for local testing
+            'user_id': mock_user_uuid, # IMPORTANT: Send the UUID to the frontend
+            'username': username,
+            'profile': profile # Include the profile data
+        }), 200
+
+    except Exception as e:
+        print(f"Error in mock login: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': 'Mock login failed due to server error'}), 500
+
+@app.route('/leaderboard', methods=['GET'])
+def get_leaderboard():
+    """Get top players leaderboard."""
+    try:
+        # This would need a more sophisticated query in production
+        # For now, return a simple response
+        return jsonify({
+            'leaderboard': [
+                {'username': 'Player1', 'gamesWon': 15, 'winRate': 75.0},
+                {'username': 'Player2', 'gamesWon': 12, 'winRate': 60.0},
+                {'username': 'Player3', 'gamesWon': 8, 'winRate': 53.3}
+            ]
+        }), 200
+    except Exception as e:
+        print(f"Error getting leaderboard: {e}")
+        return jsonify({'error': 'Failed to get leaderboard'}), 500
+
+@app.route('/user_game_history', methods=['GET'])
+def get_user_game_history():
+    """Get user's recent game history"""
+    player_id = request.args.get('player_id')
+    limit = int(request.args.get('limit', 10))
+    
+    if not player_id:
+        player_id = session.get('player_id')
+    
+    if not player_id:
+        return jsonify({'error': 'Player ID required'}), 400
+    
+    try:
+        history = game_history_service.get_user_game_history(player_id, limit)
+        return jsonify({'games': history}), 200
+    except Exception as e:
+        print(f"Error getting user game history: {e}")
+        return jsonify({'error': 'Failed to get game history'}), 500
+
 # --- SocketIO Event Handlers ---
 @socketio.on('connect')
 def handle_connect():
-    """
-    Handles a new client WebSocket connection.
-    When a client connects via WebSocket, we associate their Flask-SocketIO SID
-    with their player_id if available in the session.
-    """
-    player_id_from_session = session.get('player_id')
     current_sid = request.sid
-
+    player_id_from_session = session.get('player_id')
+    
+    print(f'Client {current_sid} attempting to connect. Session player_id: {player_id_from_session}')
+    
     if player_id_from_session:
         player_id_map[player_id_from_session] = current_sid
         join_room(current_sid)
@@ -597,6 +950,11 @@ def handle_connect():
             join_room(room_code)
             print(f'Client {current_sid} (Player ID: {player_id_from_session}) also joined game room: {room_code}')
             emit('status', {'msg': f'Re-joined game room {room_code} via WebSocket.'}, room=current_sid)
+            
+            # Send initial game state
+            game = active_games.get(room_code)
+            if game:
+                socketio.emit('game_state_update', _get_game_state_for_player(game, player_id_from_session), room=current_sid)
     else:
         print(f'Client {current_sid} connected (no player ID in session).')
         emit('status', {'msg': f'Connected to server! Your SID: {current_sid}'})
@@ -604,73 +962,142 @@ def handle_connect():
     socketio.emit('room_update', _get_all_rooms_state())
 
 @socketio.on('disconnect')
-def handle_disconnect(sid):
+def handle_disconnect():
     """
     Handles a client WebSocket disconnection.
     Removes the player's SID mapping and logs the disconnection.
     """
     current_sid = request.sid
     disconnected_player_id = None
-    room_code_of_disconnected = None
 
-    for p_id, sid in list(player_id_map.items()):
-        if sid == current_sid:
+    for p_id, sid_in_map in list(player_id_map.items()):
+        if sid_in_map == current_sid:
             disconnected_player_id = p_id
             del player_id_map[p_id]
+            print(f"Mapped Player ID {disconnected_player_id} removed from player_id_map.")
             break
 
-    print(f'Client {current_sid} (Player ID: {disconnected_player_id}) disconnected.')
+    if disconnected_player_id:
+        rooms_voice_chat_updated = set()
 
+        for room_code, participants in list(voice_chat_participants.items()):
+            if disconnected_player_id in participants:
+                del participants[disconnected_player_id]
+                print(f"Player {disconnected_player_id} removed from voice chat in room {room_code}.")
+
+                if not participants:
+                    del voice_chat_participants[room_code]
+                    print(f"Voice chat room {room_code} is now empty and removed.")
+                
+                rooms_voice_chat_updated.add(room_code)
+
+        for room_code_to_update in rooms_voice_chat_updated:
+            broadcast_voice_users_update(room_code_to_update)
+            
+    else:
+        print(f"No player ID found for disconnected SID {current_sid} in player_id_map.")
+    
     if disconnected_player_id and disconnected_player_id in player_to_room_map:
         room_code = player_to_room_map[disconnected_player_id]
+        print(f"Player {disconnected_player_id} was in game room {room_code}.")
+        
+        del player_to_room_map[disconnected_player_id]
+        
         game = active_games.get(room_code)
         if game:
+            print(f"Triggering game state update for room {room_code}.")
             _send_game_state_update_to_room_players(game)
         else:
-            print(f"DEBUG: Disconnected player {disconnected_player_id} was in room {room_code_of_disconnected}, but game no longer exists.")
+            print(f"DEBUG: Disconnected player {disconnected_player_id} was in room {room_code}, but game no longer exists in active_games.")
+    else:
+        print(f"Disconnected player {disconnected_player_id} not found in player_to_room_map or player_id was not found.")
 
     socketio.emit('room_update', _get_all_rooms_state())
+    print("Emitted global room_update.")
 
 @socketio.on('send_chat_message')
 def handle_chat_message(data):
-    """
-    Handles a 'send_chat_message' event from a client.
-    Broadcasts the message to the specific room if room_code is provided,
-    otherwise to all connected clients.
-    """
-    message = data.get('message')
+    """Enhanced chat message handler with user info."""
+    message = data.get('message', '').strip()
     room_code = data.get('room_code')
     sender_id = session.get('player_id')
+    
+    if not message:
+        return
+    
+    # Get sender info
     sender_name = "Anonymous"
+    sender_profile = None
+    
+    if sender_id:
+        # Try to get from game first
+        if sender_id in player_to_room_map:
+            game = active_games.get(player_to_room_map[sender_id])
+            if game:
+                player_obj = game.get_player_by_id(sender_id)
+                if player_obj:
+                    sender_name = player_obj.name
+        
+        # Get user profile for additional info
+        try:
+            sender_profile = user_service.get_user_profile(sender_id)
+        except:
+            pass
+    
+    # Create enhanced message payload
+    message_payload = {
+        'sender': sender_name,
+        'senderId': sender_id,
+        'message': message,
+        'timestamp': datetime.utcnow().isoformat(),
+        'senderProfile': {
+            'gamesWon': sender_profile.get('gamesWon', 0) if sender_profile else 0,
+            'userType': sender_profile.get('userType', 'anonymous') if sender_profile else 'anonymous'
+        }
+    }
+    
+    if room_code and room_code in active_games:
+        emit('receive_chat_message', message_payload, room=room_code)
+        print(f"Chat message to room {room_code} from {sender_name}: {message}")
+    else:
+        emit('receive_chat_message', message_payload, broadcast=True)
+        print(f"Broadcast chat message from {sender_name}: {message}")
 
-    if sender_id and sender_id in player_to_room_map:
-        game = active_games.get(player_to_room_map[sender_id])
-        if game:
-            player_obj = game.get_player_by_id(sender_id)
-            if player_obj:
-                sender_name = player_obj.name
-
-    if message:
-        message_payload = {'sender': sender_name, 'message': message}
-        if room_code and room_code in active_games:
-            emit('receive_chat_message', message_payload, room=room_code)
-            print(f"Chat message to room {room_code} from {sender_name}: {message}")
-        else:
-            emit('receive_chat_message', message_payload, broadcast=True)
-            print(f"Broadcast chat message from {sender_name}: {message}")
+@socketio.on('typing_indicator')
+def handle_typing_indicator(data):
+    """Handle typing indicators for chat."""
+    room_code = data.get('room_code')
+    sender_id = session.get('player_id')
+    is_typing = data.get('is_typing', False)
+    
+    if sender_id and room_code and room_code in active_games:
+        # Get sender name
+        sender_name = "Anonymous"
+        if sender_id in player_to_room_map:
+            game = active_games.get(player_to_room_map[sender_id])
+            if game:
+                player_obj = game.get_player_by_id(sender_id)
+                if player_obj:
+                    sender_name = player_obj.name
+        
+        # Broadcast typing indicator to room (except sender)
+        emit('typing_indicator', {
+            'sender': sender_name,
+            'senderId': sender_id,
+            'is_typing': is_typing
+        }, room=room_code, include_self=False)
 
 @socketio.on('join_game_room_socket')
-def on_join_game_room_socket(data):
-    """
-    Handles a client's request to join a specific SocketIO room for game updates.
-    This is called by the client *after* successfully creating/joining a room via HTTP.
-    """
+def handle_join_game_room_socket(data):
     room_code = data.get('room_code')
-    player_id = data.get('player_id')
-
+    player_id = data.get('player_id') or session.get('player_id')
+    
     if not player_id:
-        emit('status', {'msg': 'Error: Player ID not found in session.'}, room=request.sid)
+        emit('status', {'msg': 'Error: No player ID provided or in session.'}, room=request.sid)
         return
+    
+    # Ensure session has the player_id
+    session['player_id'] = player_id
     
     if room_code and room_code in active_games:
         player_id_map[player_id] = request.sid
@@ -746,9 +1173,176 @@ def on_submit_interrupt_bid(data):
         traceback.print_exc()
         emit('status', {'msg': f'An unexpected error occurred during interrupt bid: {str(e)}'}, room=request.sid)    
 
+@socketio.on('game_finished')
+def handle_game_finished(data):
+    """Handle when a game finishes."""
+    room_code = data.get('room_code')
+    winner_id = data.get('winner_id')
+    
+    if room_code in active_games:
+        game = active_games[room_code]
+        
+        _handle_game_completion(game, winner_id)
+        
+        socketio.emit('game_completed', {
+            'winner_id': winner_id,
+            'final_rankings': data.get('final_rankings', [])
+        }, room=room_code)
+
+@socketio.on('join_voice_chat')
+def handle_join_voice_chat(data):
+    """Handle user joining voice chat."""
+    room_code = data.get('room_code')
+    user_name = data.get('user_name', 'Unknown')
+    player_id = session.get('player_id')
+    
+    if not player_id or not room_code:
+        emit('voice_error', {'error': 'Missing player ID or room code'})
+        return
+    
+    if room_code not in voice_chat_participants:
+        voice_chat_participants[room_code] = {}
+    
+    voice_chat_participants[room_code][player_id] = {
+        'name': user_name,
+        'sid': request.sid,
+        'is_muted': False
+    }
+
+    join_room(f"voice_{room_code}")
+    
+    emit('user_joined_voice', {
+        'userId': player_id,
+        'userName': user_name,
+        'roomCode': room_code
+    }, room=f"voice_{room_code}", include_self=False)
+    
+    print(f"Player {user_name} ({player_id}) joined voice chat in room {room_code}")
+
+    broadcast_voice_users_update(room_code)
+
+@socketio.on('leave_voice_chat')
+def handle_leave_voice_chat(data):
+    """Handle user leaving voice chat."""
+    room_code = data.get('room_code')
+    player_id = session.get('player_id')
+    
+    if not player_id or not room_code:
+        return
+    
+    if room_code in voice_chat_participants and player_id in voice_chat_participants[room_code]:
+        del voice_chat_participants[room_code][player_id]
+        print(f"Player {player_id} removed from voice_chat_participants in room {room_code}")
+
+    leave_room(f"voice_{room_code}")
+    
+    emit('user_left_voice', {
+        'userId': player_id,
+        'roomCode': room_code
+    }, room=f"voice_{room_code}")
+    
+    print(f"Player {player_id} left voice chat in room {room_code}")
+
+    broadcast_voice_users_update(room_code)
+
+@socketio.on('voice_offer')
+def handle_voice_offer(data):
+    """Handle WebRTC offer for voice chat."""
+    target_user = data.get('target')
+    offer = data.get('offer')
+    room_code = data.get('room_code')
+    sender_id = session.get('player_id')
+    
+    if not all([target_user, offer, room_code, sender_id]):
+        return
+    
+    target_sid = player_id_map.get(target_user)
+    if target_sid:
+        emit('voice_offer', {
+            'offer': offer,
+            'sender': sender_id,
+            'room_code': room_code
+        }, room=target_sid)
+
+@socketio.on('voice_answer')
+def handle_voice_answer(data):
+    """Handle WebRTC answer for voice chat."""
+    target_user = data.get('target')
+    answer = data.get('answer')
+    room_code = data.get('room_code')
+    sender_id = session.get('player_id')
+    
+    if not all([target_user, answer, room_code, sender_id]):
+        return
+    
+    target_sid = player_id_map.get(target_user)
+    if target_sid:
+        emit('voice_answer', {
+            'answer': answer,
+            'sender': sender_id,
+            'room_code': room_code
+        }, room=target_sid)
+
+@socketio.on('voice_ice_candidate')
+def handle_voice_ice_candidate(data):
+    """Handle WebRTC ICE candidate for voice chat."""
+    target_user = data.get('target')
+    candidate = data.get('candidate')
+    room_code = data.get('room_code')
+    sender_id = session.get('player_id')
+    
+    if not all([target_user, candidate, room_code, sender_id]):
+        return
+    
+    target_sid = player_id_map.get(target_user)
+    if target_sid:
+        emit('voice_ice_candidate', {
+            'candidate': candidate,
+            'sender': sender_id,
+            'room_code': room_code
+        }, room=target_sid)
+
+@socketio.on('user_speaking')
+def handle_user_speaking(data):
+    """Handle speaking status updates."""
+    room_code = data.get('room_code')
+    is_speaking = data.get('is_speaking', False)
+    player_id = session.get('player_id')
+    
+    if not player_id or not room_code:
+        print(f"User speaking update failed: Missing player_id ({player_id}) or room_code ({room_code}).")
+        return
+    
+    if room_code in voice_chat_participants and player_id in voice_chat_participants[room_code]:
+        voice_chat_participants[room_code][player_id]['is_speaking'] = is_speaking
+        print(f"Player {player_id} in room {room_code} speaking status set to: {is_speaking}")
+        
+        broadcast_voice_users_update(room_code)
+    else:
+        print(f"User {player_id} not found in voice chat for room {room_code} for speaking update.")
+
+@socketio.on('toggle_mute_voice')
+def handle_toggle_mute_voice(data):
+    room_code = data.get('room_code')
+    sender_id = session.get('player_id')
+    
+    if not room_code or not sender_id:
+        return
+        
+    if room_code in voice_chat_participants and sender_id in voice_chat_participants[room_code]:
+        current_mute_status = voice_chat_participants[room_code][sender_id].get('is_muted', False)
+        voice_chat_participants[room_code][sender_id]['is_muted'] = not current_mute_status
+        broadcast_voice_users_update(room_code)
+        print(f"Player {sender_id} mute status toggled to {not current_mute_status} in room {room_code}")
+
 if __name__ == '__main__':
     print("Starting Flask-SocketIO server...")
+    print(f"Environment: {os.environ.get('ENVIRONMENT', 'not set')}")
+    print(f"Port: {os.environ.get('PORT', 8080)}")
+    print(f"Debug mode: True")
+    
     timer_thread = threading.Thread(target=game_timer_monitor, daemon=True)
     timer_thread.start()
+    print("Game timer monitor thread started.")
     
     socketio.run(app, debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))

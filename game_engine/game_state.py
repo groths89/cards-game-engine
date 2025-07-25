@@ -3,9 +3,11 @@ from .player import Player
 
 from .utils import get_rank_name
 class GameState:
-    def __init__(self, players):
+    def __init__(self, players=None):
         self.deck = Deck()
-        self.players = [Player(name) for name in players]
+        self.players = []
+        if players:
+            self.players = [Player(name) for name in players]
         self.pile = []
         self.current_play_rank = None
         self.current_play_count = None

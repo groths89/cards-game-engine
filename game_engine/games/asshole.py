@@ -9,7 +9,7 @@ class AssholeGame(GameState):
 
 
     def __init__(self, room_code=None, host_id=None, game_type="asshole"):
-        super(AssholeGame, self).__init__(players=[])
+        super(AssholeGame, self).__init__()
         self.room_code = room_code
         self.host_id = host_id
         self.game_type = game_type
@@ -29,6 +29,10 @@ class AssholeGame(GameState):
         self.cards_of_rank_played = {rank: 0 for rank in range(2, 15)}
         self.game_message = "Waiting for players to join..."
         self.last_played_cards = []
+        self.current_play_rank = None
+        self.current_play_count = 0
+        self.round_leader_player_id = None
+        self.last_played_player_id = None
         self.interrupt_active = False
         self.interrupt_type = None
         self.interrupt_initiator_player_id = None
@@ -823,7 +827,7 @@ class AssholeGame(GameState):
         return None #Should never happen
     
     def handle_player_out(self, player):
-        if player.get_num_cards() == 0 and not player.is_out:
+        if len(player.hand.cards) == 0 and not player.is_out:
             player.is_out = True
             player.is_active = False
             self.player_went_out += 1
@@ -880,16 +884,16 @@ class AssholeGame(GameState):
             return "President"
         elif rank == 2:
             return "Vice President"
+        elif rank == num_players:
+            return "Asshole"
+        elif rank == num_players - 1:
+            return "Vice Asshole"        
         elif rank == 3:
             return "Secretary of Keeping it Real"
         elif rank == 4:
             return "Commodore"
         elif 5 <= rank <= (num_players - 2):
             return "Peasant"
-        elif rank == num_players - 1:
-            return "Vice Asshole"        
-        elif rank == num_players:
-            return "Asshole"
         else:
             return f"Rank {rank}"
 
@@ -900,3 +904,7 @@ class AssholeGame(GameState):
     @property
     def is_game_over(self):
         return len([p for p in self.players if p.is_active and not p.is_out]) <= 1 or all(p.rank is not None for p in self.players)
+
+    def get_num_players(self):
+        """Return the number of players in the game."""
+        return len(self.players)
