@@ -7,20 +7,41 @@ import time
 import threading
 import traceback
 
-# Manually set environment variables for local development
-if not os.environ.get('ENVIRONMENT'):
-    os.environ['ENVIRONMENT'] = 'local'
-    os.environ['USERS_TABLE'] = 'gregs-games-users-local'
-    os.environ['GAME_HISTORY_TABLE'] = 'gregs-games-history-local'
-    os.environ['AWS_ACCESS_KEY_ID'] = 'dummy'
-    os.environ['AWS_SECRET_ACCESS_KEY'] = 'dummy'
-    os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
-    os.environ['DYNAMODB_ENDPOINT'] = 'http://localhost:8000'
-    os.environ['COGNITO_USER_POOL_ID'] = 'us-east-1_esUPZHWY4'
-    os.environ['COGNITO_APP_CLIENT_ID'] = '2rr03i7clo2f8lmu1qp1d1jtto'
-    os.environ['COGNITO_IDENTITY_POOL_ID'] = 'us-east-1:dcbc5711-2abf-4bc8-9298-0c2d4e135e11'
-    os.environ['COGNITO_REGION'] = 'us-east-1'
-    print("Local environment variables set")
+def configure_local_dev_environment():
+    """
+    Sets up environment variables for local development if not already set.
+    This function should NOT be called in a deployed environment.
+    """
+    if not os.environ.get('ENVIRONMENT'):
+        print("Local development environment detected. Setting local variables.")
+        os.environ['ENVIRONMENT'] = 'local'
+        os.environ['USERS_TABLE'] = 'gregs-games-users-local'
+        os.environ['GAME_HISTORY_TABLE'] = 'gregs-games-history-local'
+        os.environ['AWS_ACCESS_KEY_ID'] = 'dummy'
+        os.environ['AWS_SECRET_ACCESS_KEY'] = 'dummy'
+        os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
+        os.environ['DYNAMODB_ENDPOINT'] = 'http://localhost:8000'
+        os.environ['COGNITO_USER_POOL_ID'] = 'us-east-1_esUPZHWY4'
+        os.environ['COGNITO_APP_CLIENT_ID'] = '2rr03i7clo2f8lmu1qp1d1jtto'
+        os.environ['COGNITO_IDENTITY_POOL_ID'] = 'us-east-1:dcbc5711-2abf-4bc8-9298-0c2d4e135e11'
+        os.environ['COGNITO_REGION'] = 'us-east-1'
+    else:
+        print(f"Running in deployed environment: {os.environ.get('ENVIRONMENT')}")
+
+# AWS Cognito Configuration
+COGNITO_REGION = os.environ.get('COGNITO_REGION')
+COGNITO_USER_POOL_ID = os.environ.get('COGNITO_USER_POOL_ID')
+COGNITO_APP_CLIENT_ID = os.environ.get('COGNITO_APP_CLIENT_ID')
+COGNITO_IDENTITY_POOL_ID = os.environ.get('COGNITO_IDENTITY_POOL_ID')
+ENVIRONMENT = os.environ.get('ENVIRONMENT', 'development')
+
+# Database Configuration
+DYNAMODB_REGION = os.environ.get('DYNAMODB_REGION')
+DYNAMODB_TABLE_PREFIX = os.environ.get('DYNAMODB_TABLE_PREFIX')
+
+# Table names
+USERS_TABLE = os.environ.get('USERS_TABLE')
+GAME_HISTORY_TABLE = os.environ.get('GAME_HISTORY_TABLE')
 
 print("Starting imports...")
 print(f"Environment: {os.environ.get('ENVIRONMENT', 'not set')}")
