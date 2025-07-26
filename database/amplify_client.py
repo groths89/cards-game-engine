@@ -7,8 +7,8 @@ class AmplifyDynamoDBClient:
         # Use Amplify-generated table names in production
         if os.environ.get('ENVIRONMENT') == 'production':
             # These will be set by Amplify deployment
-            self.users_table_name = os.environ.get('AMPLIFY_USER_TABLE_NAME')
-            self.game_history_table_name = os.environ.get('AMPLIFY_GAME_HISTORY_TABLE_NAME')
+            self.users_table_name = os.environ.get('USERS_TABLE')
+            self.game_history_table_name = os.environ.get('GAME_HISTORY_TABLE')
             self.dynamodb = boto3.resource('dynamodb')
         else:
             # Local development
@@ -23,9 +23,13 @@ class AmplifyDynamoDBClient:
             )
     
     def get_users_table(self):
+        if not self.users_table_name:
+            raise ValueError("DynamoDB USERS_TABLE environment variable not set or is None.")
         return self.dynamodb.Table(self.users_table_name)
     
     def get_game_history_table(self):
+        if not self.game_history_table_name:
+            raise ValueError("DynamoDB GAME_HISTORY_TABLE environment variable not set or is None.")
         return self.dynamodb.Table(self.game_history_table_name)
     
     def create_tables(self):
