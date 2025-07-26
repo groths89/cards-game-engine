@@ -83,13 +83,14 @@ if os.environ.get('ENVIRONMENT') == 'local':
 frontend_origins = [
     "http://localhost:3000",
     "https://main.dt7s5ohdz6dup.amplifyapp.com",
+    "https://dev.dt7s5ohdz6dup.amplifyapp.com",
     "https://play.gregsgames.social",
 ]
 frontend_origins = [origin for origin in frontend_origins if origin is not None]
 
 CORS(app, resources={r"/*": {"origins": frontend_origins}}, supports_credentials=True)
 
-socketio = SocketIO(app, cors_allowed_origins=frontend_origins, async_mode='eventlet')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 active_games = {}
 print(f"DEBUG_GLOBAL_ACTIVE_GAMES_ID_AT_START: {id(active_games)}")
