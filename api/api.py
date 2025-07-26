@@ -1357,14 +1357,26 @@ def handle_toggle_mute_voice(data):
         broadcast_voice_users_update(room_code)
         print(f"Player {sender_id} mute status toggled to {not current_mute_status} in room {room_code}")
 
-if __name__ == '__main__':
-    print("Starting Flask-SocketIO server...")
-    print(f"Environment: {os.environ.get('ENVIRONMENT', 'not set')}")
-    print(f"Port: {os.environ.get('PORT', 8080)}")
-    print(f"Debug mode: True")
-    
+try:
     timer_thread = threading.Thread(target=game_timer_monitor, daemon=True)
     timer_thread.start()
-    print("Game timer monitor thread started.")
+    print("Game timer monitor thread started successfully for all environments.", flush=True)
+except Exception as e:
+    print(f"ERROR: Failed to start game timer monitor thread: {e}", flush=True)
+    import sys, traceback
+    traceback.print_exc(file=sys.stderr)
+    sys.exit(1)
+
+
+if __name__ == '__main__':
+    #print("Starting Flask-SocketIO server...")
+    #print(f"Environment: {os.environ.get('ENVIRONMENT', 'not set')}")
+    #print(f"Port: {os.environ.get('PORT', 8080)}")
+    #print(f"Debug mode: True")
     
-    socketio.run(app, debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    #timer_thread = threading.Thread(target=game_timer_monitor, daemon=True)
+    #timer_thread.start()
+    #print("Game timer monitor thread started.")
+    
+    #socketio.run(app, debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    pass
