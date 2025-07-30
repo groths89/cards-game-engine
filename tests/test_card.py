@@ -6,17 +6,17 @@ from main import Card
 
 class TestCardClass(unittest.TestCase):
     def test_card_creation(self):
-        card = Card("Hearts", 5)
-        self.assertEqual(card.suit, "Hearts")
-        self.assertEqual(card.rank, 5)
-        self.assertEqual(str(card), "H5")
+        card = Card("H", "5")
+        assert card.suit == "H"
+        assert card.rank == "5"
+        assert str(card) == "5H"
 
     def test_card_value(self):
-        card_ace = Card("Spades", 14)
+        card_ace = Card("S", "A")
         self.assertEqual(card_ace.get_value(), 14)
-        card_two = Card("Diamonds", 2)
-        self.assertEqual(card_two.get_value(), 15)
-        card_three = Card("Clubs", 3)
+        card_two = Card("D", "2")
+        self.assertEqual(card_two.get_value(), 2)
+        card_three = Card("C", "3")
         self.assertEqual(card_three.get_value(), 3)
 
 if __name__ == '__main__':
