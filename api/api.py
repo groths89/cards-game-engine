@@ -107,7 +107,17 @@ CORS(app, resources={r"/*": {"origins": frontend_origins}}, supports_credentials
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet', logger=True, engineio_logger=True)
 
 active_games = {}
-print(f"DEBUG_GLOBAL_ACTIVE_GAMES_ID_AT_START: {id(active_games)}")
+logger.debug(f"DEBUG_GLOBAL_ACTIVE_GAMES_ID_AT_START: {id(active_games)}")
+try:
+    logger.debug("Attempting the first critical operation after active_games ID debug.")
+    logger.debug("Just before potential problematic call 1...")
+    logger.debug("Just after potential problematic call 1.")
+    logger.debug("Just before potential problematic call 2...")
+    logger.debug("Just after potential problematic call 2.")
+    logger.debug("All initial setup after active_games ID debug completed successfully.")
+except Exception as e:
+    logger.critical(f"CRITICAL ERROR: Application crashed during startup after active_games ID debug!", exc_info=True)
+    raise
 player_id_map = {}
 player_to_room_map = {}
 
