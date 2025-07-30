@@ -104,7 +104,7 @@ frontend_origins = [origin for origin in frontend_origins if origin is not None]
 
 CORS(app, resources={r"/*": {"origins": frontend_origins}}, supports_credentials=True)
 
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet', logger=True, engineio_logger=True)
+socketio = SocketIO(app, cors_allowed_origins=frontend_origins, async_mode='eventlet', logger=True, engineio_logger=True)
 
 active_games = {}
 logger.debug(f"DEBUG_GLOBAL_ACTIVE_GAMES_ID_AT_START: {id(active_games)}")
