@@ -3,6 +3,7 @@ eventlet.monkey_patch()
 
 from datetime import datetime, timezone
 import uuid
+import logging
 import os
 import sys
 import random
@@ -73,6 +74,16 @@ from game_engine.card import Card
 print("Game engine imports successful...")
 print("All imports completed successfully!")
 
+# --- START Logging Configuration ---
+logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+logging.getLogger('boto3').setLevel(logging.DEBUG)
+logging.getLogger('botocore').setLevel(logging.DEBUG)
+logging.getLogger('urllib3').setLevel(logging.DEBUG)
+# --- END Logging Configuration ---
+
 app = Flask(__name__)
 print("Flask app created...")
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'my_dev_key')
@@ -93,7 +104,7 @@ frontend_origins = [origin for origin in frontend_origins if origin is not None]
 
 CORS(app, resources={r"/*": {"origins": frontend_origins}}, supports_credentials=True)
 
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet', logger=True, engineio_logger=True)
 
 active_games = {}
 print(f"DEBUG_GLOBAL_ACTIVE_GAMES_ID_AT_START: {id(active_games)}")
