@@ -367,19 +367,11 @@ def broadcast_voice_users_update(room_code):
     emit('voice_users_update', users_in_room, room=f"voice_{room_code}")
 
 def send_message_to_client(connection_id, event_name, payload):
-    # This function needs to be implemented. It would either:
-    # 1. Make an HTTP POST request to your 'SendMessageLambda' API Gateway URL
-    # 2. Or, if App Runner has IAM permissions, use boto3 to call apigatewaymanagementapi.post_to_connection() directly.
-    # (Refer to the previous "Outgoing Messages" section for details on this)
     print(f"Attempting to send '{event_name}' to {connection_id} with payload: {payload}")
-    # Placeholder: replace with actual call to SendMessageLambda or APIGW Management API
     pass
 
 def send_message_to_room(room_code, event_name, payload):
-    # This function would query your persistent database to get all connection_ids for the room
-    # For each connection_id, call send_message_to_client
     print(f"Attempting to send '{event_name}' to room {room_code} with payload: {payload}")
-    # Placeholder: query persistent player_to_room_map to get connection_ids
     pass
 
 # --- HTTP API Endpoints ---
@@ -1008,8 +1000,7 @@ def handle_connection_lifecycle_event():
         notification = request.get_json()
         event_type = notification.get('eventType')
         connection_id = notification.get('connectionId')
-        # You might also pass 'player_id' if available from client in connect handshake
-        player_id_from_client = notification.get('player_id') # If you configure API GW to pass it
+        player_id_from_client = notification.get('player_id')
 
         if not connection_id or not event_type:
             return jsonify({"status": "Invalid notification"}), 400
@@ -1017,59 +1008,24 @@ def handle_connection_lifecycle_event():
         if event_type == 'connect':
             print(f'App Runner received CONNECT notification for {connection_id}.')
 
-            # --- Your original handle_connect() logic starts here ---
-            # IMPORTANT: All these maps must now be persistent (DynamoDB/Redis)
-            player_id_from_session = session.get('player_id') # Flask session might still work for player_id
-            
-            # Use the player_id passed from a previous HTTP login/game creation, or from the client itself
-            # You'll need to decide how player_id is linked to connectionId now
-            # Often, clients will send player_id as a query param or header in the initial WS handshake
-            # which API Gateway can then pass through to the Lambda and then to App Runner.
+            player_id_from_session = session.get('player_id')
             
             current_player_id = player_id_from_session or player_id_from_client
 
             if current_player_id:
-                # Store/update player_id to connection_id mapping in persistent DB
-                # e.g., connections_table.update_item(Key={'connectionId': connection_id}, UpdateExpression='SET playerId = :pid', ExpressionAttributeValues={':pid': current_player_id})
-                # OR in a separate players_to_connections_table (DynamoDB or Redis)
-                # Your player_id_map would become a DB query
-                
                 print(f'Client {connection_id} (Player ID: {current_player_id}) connected.')
                 send_message_to_client(connection_id, 'status', {'msg': f'Connected to server! Your ID: {connection_id}. Player ID: {current_player_id}'})
-
-                # Check player_to_room_map (now persistent)
-                # if current_player_id in persistent_player_to_room_map:
-                #     room_code = persistent_player_to_room_map[current_player_id]
-                #     send_message_to_client(connection_id, 'status', {'msg': f'Re-joined game room {room_code} via WebSocket.'})
-                #     game = active_games.get(room_code) # active_games must be persistent
-                #     if game:
-                #         send_message_to_client(connection_id, 'game_state_update', _get_game_state_for_player(game, current_player_id))
             else:
                 print(f'Client {connection_id} connected (no player ID yet).')
                 send_message_to_client(connection_id, 'status', {'msg': f'Connected to server! Your ID: {connection_id}'})
 
-            # send_message_to_all_clients('room_update', _get_all_rooms_state()) # Need to implement 'send_message_to_all_clients'
-            # --- End of original handle_connect() logic ---
-
         elif event_type == 'disconnect':
             print(f'App Runner received DISCONNECT notification for {connection_id}.')
 
-            # --- Your original handle_disconnect() logic starts here ---
-            # IMPORTANT: All these maps must now be persistent (DynamoDB/Redis)
             disconnected_player_id = None
-            # Find player_id associated with this connection_id from persistent DB
-            # if connection_id in persistent_player_id_map_reverse: # e.g., a secondary index or another table
-            #     disconnected_player_id = persistent_player_id_map_reverse[connection_id]
             
             if disconnected_player_id:
-                # Remove player_id to connection_id mapping from persistent DB
-                # Clean up voice chat participants in persistent DB
-                # Clean up player_to_room_map in persistent DB
-                # Potentially trigger game state updates via send_message_to_room
-                pass # Placeholder for your logic
-
-            # send_message_to_all_clients('room_update', _get_all_rooms_state())
-            # --- End of original handle_disconnect() logic ---
+                pass
 
         return jsonify({"status": "Notification processed"}), 200
 
