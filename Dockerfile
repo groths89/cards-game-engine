@@ -1,5 +1,5 @@
 # Stage 1: Build stage for installing dependencies
-FROM python:3.9-slim as builder
+FROM python:3.9-slim AS builder
 
 WORKDIR /app
 
@@ -20,4 +20,8 @@ COPY . .
 
 EXPOSE 8080
 
-CMD ["gunicorn", "--bind", "0.0.0.0:$PORT", "--worker-class", "gevent", "--workers", "1", "--threads", "8", "--timeout", "0", "api.api:app"]
+COPY start.sh .
+
+RUN chmod +x start.sh
+
+CMD ["./start.sh"]
