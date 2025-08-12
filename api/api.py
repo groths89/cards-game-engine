@@ -366,6 +366,14 @@ def broadcast_voice_users_update(room_code):
     print(f"Broadcasting voice_users_update for room {room_code}: {users_in_room}")
     emit('voice_users_update', users_in_room, room=f"voice_{room_code}")
 
+def send_message_to_client(connection_id, event_name, payload):
+    print(f"Attempting to send '{event_name}' to {connection_id} with payload: {payload}")
+    pass
+
+def send_message_to_room(room_code, event_name, payload):
+    print(f"Attempting to send '{event_name}' to room {room_code} with payload: {payload}")
+    pass
+
 # --- HTTP API Endpoints ---
 @app.route("/")
 def home():
@@ -976,6 +984,55 @@ def get_user_game_history():
     except Exception as e:
         print(f"Error getting user game history: {e}")
         return jsonify({'error': 'Failed to get game history'}), 500
+
+@app.route('/websocket-message', methods=['POST'])
+def handle_incoming_websocket_message_from_api_gateway():
+    """
+    This route is for handling WebSocket messages sent from API Gateway.
+    """
+    data = request.get_json()
+    print(f"Received WebSocket message from API Gateway: {data}")
+    return jsonify({'success': True}), 200
+
+@app.route('/connection-lifecycle-event', methods=['POST'])
+def handle_connection_lifecycle_event():
+    try:
+        notification = request.get_json()
+        event_type = notification.get('eventType')
+        connection_id = notification.get('connectionId')
+        player_id_from_client = notification.get('player_id')
+
+        if not connection_id or not event_type:
+            return jsonify({"status": "Invalid notification"}), 400
+
+        if event_type == 'connect':
+            print(f'App Runner received CONNECT notification for {connection_id}.')
+
+            player_id_from_session = session.get('player_id')
+            
+            current_player_id = player_id_from_session or player_id_from_client
+
+            if current_player_id:
+                print(f'Client {connection_id} (Player ID: {current_player_id}) connected.')
+                send_message_to_client(connection_id, 'status', {'msg': f'Connected to server! Your ID: {connection_id}. Player ID: {current_player_id}'})
+            else:
+                print(f'Client {connection_id} connected (no player ID yet).')
+                send_message_to_client(connection_id, 'status', {'msg': f'Connected to server! Your ID: {connection_id}'})
+
+        elif event_type == 'disconnect':
+            print(f'App Runner received DISCONNECT notification for {connection_id}.')
+
+            disconnected_player_id = None
+            
+            if disconnected_player_id:
+                pass
+
+        return jsonify({"status": "Notification processed"}), 200
+
+    except Exception as e:
+        print(f"Error processing connection lifecycle notification: {e}")
+        traceback.print_exc()
+        return jsonify({"status": "Error", "message": str(e)}), 500
 
 # --- SocketIO Event Handlers ---
 @socketio.on('connect')
