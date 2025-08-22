@@ -7,7 +7,11 @@ from game_engine.deck import Deck
 # Export classes for tests
 __all__ = ['AssholeGame', 'Card', 'Rank', 'Suit', 'Player', 'GameState', 'Deck']
 
-if __name__ == "__main__":
-    # Example usage
+def main():
     game = AssholeGame()
     print("Card game engine started!")
+
+
+if __name__ == "__main__":
+    main()
+
