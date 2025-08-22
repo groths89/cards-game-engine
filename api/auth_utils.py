@@ -5,6 +5,11 @@ from botocore.exceptions import ClientError
 from functools import wraps
 from flask import request, jsonify, session
 
+cognito_client = boto3.client(
+    'cognito-idp',
+    region_name=os.getenv('COGNITO_REGION', 'us-east-1')
+)
+
 def create_cognito_user(username, password, email):
     """Create a new user in Cognito."""
     if os.environ.get('ENVIRONMENT') == 'local':
@@ -15,12 +20,7 @@ def create_cognito_user(username, password, email):
             'message': 'Mock user created'
         }
     
-    try:
-        cognito_client = boto3.client(
-            'cognito-idp',
-            region_name=os.getenv('COGNITO_REGION', 'us-east-1')
-        )
-        
+    try:        
         response = cognito_client.admin_create_user(
             UserPoolId=os.getenv('COGNITO_USER_POOL_ID'),
             Username=username,

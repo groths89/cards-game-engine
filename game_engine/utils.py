@@ -1,4 +1,4 @@
-def get_rank_name(self, rank):
+def get_rank_name(rank):
     if 1 < rank < 11:
          return str(rank)
     elif rank == 11:
