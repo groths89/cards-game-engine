@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  WebSocket Game Engine Deployment
+
+Globals:
+  Function:
+    Timeout: 30 # Default timeout for all functions
+    MemorySize: 256 # Default memory for all functions
+
+Resources:
+  # 1. Define the WebSocket API Gateway
+  GameWebSocketAPI:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: CardGameEngineWebSocket
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: $request.body.action
+
+  # 2. Define the Lambda Function (Using Container Image)
+  ConnectHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      # Use your Dockerfile path
+      PackageType: Image
+      ImageUri: ConnectHandlerUri # This URI is filled by SAM build/deploy process
+      Architectures:
+        - x86_64
+      # Link to your API Gateway
+      Events:
+        ConnectRoute:
+          Type: Api
+          Properties:
+            Method: ""
+            Path: ""
+
+  # Add more functions here (e.g., SendChatHandlerFunction, SubmitBidHandlerFunction)
+  # ...
+
+  # 3. Define the DynamoDB Table for Connection State
+  # This is crucial for replacing your in-memory maps (player_id_map)
+  ConnectionTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: GameConnections
+      AttributeDefinitions:
+        - AttributeName: connectionId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connectionId
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
