@@ -9,3 +9,5 @@ __pycache__
 .env.test
 .env.production
 .env.staging
+
+/venv/
