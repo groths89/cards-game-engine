@@ -1,54 +1,164 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: >
-  WebSocket Game Engine Deployment
+Description: Serverless WebSocket Game Engine Backend
 
-Globals:
-  Function:
-    Timeout: 30 # Default timeout for all functions
-    MemorySize: 256 # Default memory for all functions
+Parameters:
+  # This stage name will be used in the final WebSocket URL (e.g., /prod)
+  StageName:
+    Type: String
+    Default: dev
 
 Resources:
-  # 1. Define the WebSocket API Gateway
-  GameWebSocketAPI:
+  # ----------------------------------------------------------------------
+  # 1. WebSocket API Gateway Definition
+  # ----------------------------------------------------------------------
+  WebsocketApi:
     Type: AWS::ApiGatewayV2::Api
     Properties:
-      Name: CardGameEngineWebSocket
+      Name: !Sub ${AWS::StackName}-WebSocket-API
+      # THIS IS THE CORRECT LOCATION FOR ProtocolType
       ProtocolType: WEBSOCKET
-      RouteSelectionExpression: $request.body.action
+      RouteSelectionExpression: "$request.body.action" # $request.body.action is standard for custom routes
 
-  # 2. Define the Lambda Function (Using Container Image)
-  ConnectHandlerFunction:
+  # ----------------------------------------------------------------------
+  # 2. AWS Lambda Function (The Core Game Handler)
+  # ----------------------------------------------------------------------
+  GameEngineWebSocketHandler:
     Type: AWS::Serverless::Function
     Properties:
-      # Use your Dockerfile path
-      PackageType: Image
-      ImageUri: ConnectHandlerUri # This URI is filled by SAM build/deploy process
-      Architectures:
-        - x86_64
-      # Link to your API Gateway
+      FunctionName: GameEngineWebSocketHandler
+      Handler: app.lambda_handler # Assumes your handler function is in 'app.py'
+      Runtime: python3.12
+      CodeUri: src/ # Assumes your code is in a subdirectory named 'src'
+      Timeout: 10
+      MemorySize: 256
+      # Environment variables for table names
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE_NAME: !Ref PlayerConnectionsTable
+          GAMESESSIONS_TABLE_NAME: !Ref GameSessionsTable
+
+      # Permissions: SAM Policy Templates simplify IAM.
+      Policies:
+        # Allows R/W access to both DynamoDB tables
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PlayerConnectionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref GameSessionsTable
+        # Allows Lambda to send messages back to the clients via API Gateway
+        - Statement:
+            Effect: Allow
+            Action:
+              - execute-api:ManageConnections
+            Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebsocketApi}/*
+
       Events:
-        ConnectRoute:
+        # Define the WebSocket API and all its routes
+        AllWebSocketRoutes:
           Type: Api
           Properties:
-            Method: ""
-            Path: ""
+            RestApiId: !Ref WebsocketApi # Reference the API defined above
+            # Define all routes here. SAM automatically creates the route, stage, and integration.
+            # RouteKey is the incoming message's action property.
+            Method: GET # Must be specified, but is ignored for WebSockets
+            Path: "$connect"
 
-  # Add more functions here (e.g., SendChatHandlerFunction, SubmitBidHandlerFunction)
-  # ...
+        DisconnectRoute:
+          Type: Api
+          Properties:
+            RestApiId: !Ref WebsocketApi
+            Method: GET
+            Path: "$disconnect"
 
-  # 3. Define the DynamoDB Table for Connection State
-  # This is crucial for replacing your in-memory maps (player_id_map)
-  ConnectionTable:
+        DefaultRoute:
+          Type: Api
+          Properties:
+            RestApiId: !Ref WebsocketApi
+            Method: GET
+            Path: "$default"
+
+        # Example Custom Routes (Add all remaining 13 custom routes here)
+        JoinGameRoomRoute:
+          Type: Api
+          Properties:
+            RestApiId: !Ref WebsocketApi
+            Method: GET
+            Path: "join_game_room" # This maps to the action: 'join_game_room'
+
+        SubmitBidRoute:
+          Type: Api
+          Properties:
+            RestApiId: !Ref WebsocketApi
+            Method: GET
+            Path: "submit_interrupt_bid" # This maps to the action: 'submit_interrupt_bid'
+
+        # Add all remaining custom routes (e.g., SendChatMessageRoute, GameFinishedRoute, etc.) here...
+
+  # ----------------------------------------------------------------------
+  # 2. DynamoDB Tables
+  # ----------------------------------------------------------------------
+  PlayerConnectionsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: GameConnections
+      TableName: PlayerConnections
+      BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
-        - AttributeName: connectionId
+        - AttributeName: ConnectionId
+          AttributeType: S
+        - AttributeName: RoomCode
           AttributeType: S
       KeySchema:
-        - AttributeName: connectionId
+        - AttributeName: ConnectionId
+          KeyType: HASH # HASH is the Partition Key
+      # The GSI is REQUIRED for broadcasting messages by room
+      GlobalSecondaryIndexes:
+        - IndexName: RoomCodeIndex
+          KeySchema:
+            - AttributeName: RoomCode
+              KeyType: HASH
+          Projection:
+            ProjectionType: KEYS_ONLY # Most efficient for broadcasting
+
+  GameSessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: GameSessions
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: RoomCode
+          AttributeType: S
+      KeySchema:
+        - AttributeName: RoomCode
           KeyType: HASH
-      ProvisionedThroughput:
-        ReadCapacityUnits: 5
-        WriteCapacityUnits: 5
+
+  # ----------------------------------------------------------------------
+  # 3. Integration Mappings (Tells API Gateway to use the Lambda)
+  # ----------------------------------------------------------------------
+  ConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebsocketApi
+      IntegrationType: AWS_PROXY # Correct type for non-proxy Lambda integration with WebSockets
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GameEngineWebSocketHandler.Arn}/invocations
+
+  DisconnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebsocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GameEngineWebSocketHandler.Arn}/invocations
+
+  DefaultIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebsocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GameEngineWebSocketHandler.Arn}/invocations
+
+# ----------------------------------------------------------------------
+# Outputs (The Final WebSocket URL)
+# ----------------------------------------------------------------------
+Outputs:
+  WebSocketApiUrl:
+    Description: "The URL clients will use to connect to the WebSocket API"
+    Value: !Sub wss://${WebsocketApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}

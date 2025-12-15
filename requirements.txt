@@ -5,6 +5,7 @@ eventlet==0.33.3
 gunicorn
 gevent
 boto3
+chalice
 PyJWT==2.8.0
 cryptography==41.0.7
 requests
