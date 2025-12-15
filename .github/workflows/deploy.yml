@@ -1,6 +1,5 @@
 name: Deploy Game Engine CI/CD Pipeline
 
-# This workflow runs on pushes to the 'main' branch
 on:
   push:
     branches:
@@ -10,7 +9,7 @@ on:
 # 1. RUN TESTS
 # ----------------------------------------------------
 jobs:
-  test: # This job runs first
+  test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
