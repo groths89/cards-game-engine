@@ -79,7 +79,7 @@ jobs:
           IMAGE_TAG: ${{ github.sha }}
         run: |
           docker push ${{ env.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
-          docker push ${{ env.ECR_REGISTRY }}/$${{ vars.ECR_REPOSITORY }}:latest
+          docker push ${{ env.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY }}:latest
 
       # --------------------------------------------------------
       # ECS Deployment Step
