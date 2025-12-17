@@ -38,4 +38,6 @@ jobs:
     needs: [build, set-env]
     if: github.event_name == 'release'
     uses: ./.github/workflows/deploy.yml
+    with:
+      environment: ${{ needs.set-env.outputs.target_env }}
     secrets: inherit
