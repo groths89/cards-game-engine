@@ -11,6 +11,8 @@ jobs:
       name: production
 
     steps:
+      - name: ⬇️ Checkout Repository
+        uses: actions/checkout@v4
       - name: ⚙️ Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -33,5 +35,4 @@ jobs:
           task-definition: ${{ vars.ECS_TASK_DEFINITION }}
           service: ${{ vars.ECS_SERVICE }}
           cluster: ${{ vars.ECS_CLUSTER }}
-          target-container: ${{ vars.CONTAINER_NAME }}
-          image: ${{ env.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          desired-count: 1
