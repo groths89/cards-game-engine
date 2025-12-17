@@ -1,4 +1,4 @@
-name: Run Unit Tests
+name: "🧪 Task: Run Unit Tests"
 
 on:
   workflow_call:
@@ -10,30 +10,30 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: ⬇️ Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: 🐍 Set up Python
         uses: actions/setup-python@v2
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
+      - name: 📦 Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run tests
+      - name: 🔍 Run tests
         run: |
           pytest --cov --junitxml=junit.xml --cov-report=xml -o junit_family=legacy
 
-      - name: Upload coverage to Codecov
+      - name: ☂️ Upload coverage to Codecov
         uses: codecov/codecov-action@v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
 
-      - name: Upload test results to Codecov
+      - name: 📊 Upload test results to Codecov
         if: ${{ !cancelled() }}
         uses: codecov/test-results-action@v1
         with:
