@@ -78,17 +78,20 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push ${{ env.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          docker push ${{ env.ECR_REGISTRY }}/$${{ vars.ECR_REPOSITORY }}:latest
 
       # --------------------------------------------------------
       # ECS Deployment Step
       # --------------------------------------------------------
       - name: 🚀 Deploy new image to ECS Service
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         with:
           task-definition: ${{ vars.ECS_TASK_DEFINITION }}
           service: ${{ vars.ECS_SERVICE }}
           cluster: ${{ vars.ECS_CLUSTER }}
           target-container: ${{ vars.CONTAINER_NAME }}
-          image: ${{ steps.login-ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ github.sha }}
+          image: ${{ env.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
