@@ -5,17 +5,37 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
+  release:
+    types: [published]
 
 jobs:
+  set-env:
+    name: "🔍 Determine Environment"
+    runs-on: ubuntu-latest
+    outputs:
+      target_env: ${{ steps.check.outputs.env }}
+    steps:
+      - id: check
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "env=production" >> $GITHUB_OUTPUT
+          else
+            echo "env=development" >> $GITHUB_OUTPUT
+          fi
   test:
+    name: "🧪 Run Unit Tests"
     uses: ./.github/workflows/test.yml
     secrets: inherit
   build:
-    needs: [test]
+    name: "🔨 Build & Push to ECR"
+    needs: [test, set-env]
     uses: ./.github/workflows/build.yml
+    with:
+      environment: ${{ needs.set-env.outputs.target_env }}
     secrets: inherit
   deploy:
-    needs: [build]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    name: "📦 Deploy to ECS"
+    needs: [build, set-env]
+    if: github.event_name == 'release'
     uses: ./.github/workflows/deploy.yml
     secrets: inherit
