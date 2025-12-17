@@ -2,13 +2,15 @@ name: "📦 Task: Deploy Game Engine to ECS"
 
 on:
   workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
-    environment:
-      name: production
+    environment: ${{ inputs.environment }}
 
     steps:
       - name: ⬇️ Checkout Repository
